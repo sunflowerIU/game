@@ -1,0 +1,14 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "incremental": true,
+    "jsx": "preserve",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "noEmit": true,
+    "plugins": [{ "name": "next" }]
+  },
+  "include": ["next-env.d.ts", ".next/types/**/*.ts", "**/*.ts", "**/*.tsx", "../web/components/admin-dashboard.tsx", "../web/components/platform-operations.tsx", "../web/components/table-pagination.tsx", "../web/components/toast-provider.tsx", "../web/lib/api-client.ts"],
+  "exclude": ["node_modules"]
+}

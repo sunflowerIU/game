@@ -1,0 +1,332 @@
+import assert from "node:assert/strict";
+import { after, test } from "node:test";
+
+import { buildApp } from "./app.js";
+import { WalletEventBroker } from "./wallet-events.js";
+
+const authenticatedPrincipal = {
+  accountId: "fa05dfb8-e4e3-49f6-bd92-50d086b28294",
+  username: "TestAdmin",
+  type: "ADMIN" as const,
+  permissions: new Set(["SECURITY_VIEW", "WALLET_CREDIT"]),
+  sessionId: "session-1"
+};
+const cleanupAdminPrincipal = { ...authenticatedPrincipal, permissions: new Set(["PLAYER_DELETE", "DATA_RETENTION_MANAGE"]) };
+const playerPrincipal = { accountId: "5fdb5ce8-a3c9-41f7-bd25-4072f67123e1", username: "TestPlayer", type: "PLAYER" as const, permissions: new Set<string>(), sessionId: "session-2" };
+let receivedPasswordChange: { currentPassword: string; newPassword: string } | null = null;
+
+const auth = {
+  login: async () => ({
+    account: {
+      id: authenticatedPrincipal.accountId,
+      username: authenticatedPrincipal.username,
+      type: authenticatedPrincipal.type
+    },
+    sessionToken: "A".repeat(43),
+    expiresAt: new Date("2026-08-25T12:00:00.000Z")
+  }),
+  authenticate: async (token: string | undefined) => {
+    if (token === undefined) {
+      const { AuthError } = await import("@game-platform/auth");
+      throw new AuthError("AUTH_REQUIRED", "Authentication required");
+    }
+    return token.startsWith("B") ? playerPrincipal : token.startsWith("C") ? cleanupAdminPrincipal : authenticatedPrincipal;
+  },
+  logout: async () => undefined,
+  changePassword: async (_principal: unknown, input: { currentPassword: string; newPassword: string }) => { receivedPasswordChange = input; }
+};
+
+const admin = {
+  listPlayers: async () => [],
+  listAuditLogs: async () => [],
+  createPlayer: async () => { throw new Error("not used"); },
+  setPlayerEnabled: async () => { throw new Error("not used"); },
+  resetPassword: async () => undefined,
+  previewPlayerDeletion: async (_principal: unknown, input: { playerId: string }) => ({ playerId: input.playerId, username: "DeleteMe", status: "DISABLED" as const, balance: 25n, activeGameSessions: 0, counts: cleanupCounts }),
+  deletePlayer: async (_principal: unknown, input: { playerId: string }) => ({ cleanupRunId: "b7f34c87-5bd5-4ab2-9610-f638c4c27a5a", playerId: input.playerId, username: "DeleteMe", balanceDeleted: 25n, counts: cleanupCounts }),
+  previewPlayerRecordCleanup: async (_principal: unknown, input: { playerId: string; retentionDays: number }) => ({ playerId: input.playerId, username: "DeleteMe", retentionDays: input.retentionDays, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), counts: cleanupCounts }),
+  deletePlayerRecords: async (_principal: unknown, input: { playerId: string; retentionDays: number }) => ({ cleanupRunId: "3528064d-6749-4270-be00-57a31d2cbbda", playerId: input.playerId, username: "DeleteMe", retentionDays: input.retentionDays, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), counts: cleanupCounts }),
+  previewInactivePlayerCleanup: async (_principal: unknown, input: { inactivityDays: number; includePositiveBalances: boolean }) => ({ ...input, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), inactivePlayers: 8, activeSessionPlayers: 1, positiveBalancePlayers: 2, positiveBalanceTotal: 75n, deletablePlayers: input.includePositiveBalances ? 7 : 5 }),
+  deleteInactivePlayerBatch: async (_principal: unknown, input: { inactivityDays: number; includePositiveBalances: boolean; batchSize: number }) => ({ cleanupRunId: "7a226aab-239e-48f7-8e75-e50cf890c25d", ...input, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), deletedPlayers: 5, deletedBalance: 0n, deletedRecords: cleanupCounts, remainingPlayers: 0 })
+};
+
+const cleanupCounts = { authSessions: 1, loginEvents: 2, securityEvents: 3, ownedGameSessions: 4, gameParticipations: 4, gameResults: 4, ledgerEntries: 5, adminAuditLogs: 6 };
+
+let receivedIdempotencyKey: string | null = null;
+const walletRecord = { accountId: "5fdb5ce8-a3c9-41f7-bd25-4072f67123e1", balance: 10n, version: 1, updatedAt: new Date("2026-08-25T10:00:00.000Z") };
+const ledgerRecord = { id: "6b37e9d2-5038-442f-9e2e-a0ff9e1e5204", type: "ADMIN_DEPOSIT" as const, amount: 10n, balanceBefore: 0n, balanceAfter: 10n, referenceType: "ADMIN_ADJUSTMENT", referenceId: authenticatedPrincipal.accountId, createdAt: new Date("2026-08-25T10:00:00.000Z") };
+const wallet = {
+  getOwnWallet: async () => walletRecord,
+  listOwnEntries: async () => [ledgerRecord],
+  credit: async (_principal: unknown, input: { idempotencyKey: string }) => { receivedIdempotencyKey = input.idempotencyKey; return { wallet: walletRecord, entry: ledgerRecord, replayed: false }; },
+  debit: async () => { throw new Error("not used"); }
+};
+const gameCatalog = { listGames: async () => [] };
+const receivedGameStarts: { entryAmount: bigint; idempotencyKey: string }[] = [];
+const gameSession = { id: "2c84e3d5-4ba7-49ec-9c57-70ea25f30131", gameId: "d9ab8c9e-c72f-4c87-b6eb-e61267269b61", gameVersion: "1.0.0", status: "COMPLETED" as const, entryAmount: 10n, startedAt: new Date("2026-08-25T10:00:00.000Z"), completedAt: new Date("2026-08-25T10:00:00.000Z"), score: 0, reward: 0n };
+const gameSessions = { start: async (_principal: unknown, input: { entryAmount: bigint; idempotencyKey: string }) => { receivedGameStarts.push(input); return { session: gameSession, publicState: { status: "COMPLETED" }, replayed: false, nextSequence: 1 }; }, history: async () => [], resume: async () => null };
+const platformAdmin = {
+  listGames: async () => [], listGameSessions: async () => [], listSecurityEvents: async () => [],
+  getPlayerDetail: async () => { throw new Error("not used"); }, setGameStatus: async () => { throw new Error("not used"); }, updateConfiguration: async () => { throw new Error("not used"); }
+};
+const walletEvents = new WalletEventBroker();
+let publishedWalletBalance: string | null = null;
+walletEvents.subscribe(walletRecord.accountId, (event) => { publishedWalletBalance = event.wallet.balance; });
+
+const app = buildApp({
+  databaseUrl: "postgresql://unused",
+  host: "127.0.0.1",
+  logLevel: "silent",
+  nodeEnv: "test",
+  port: 4_000,
+  trustProxy: false,
+  webOrigin: "http://localhost:3000"
+}, {
+  admin,
+  platformAdmin,
+  auth,
+  wallet,
+  gameCatalog,
+  gameSessions,
+  walletEvents,
+  readinessCheck: async () => undefined
+});
+
+after(async () => app.close());
+
+test("liveness endpoint returns only public health data", async () => {
+  const response = await app.inject({ method: "GET", url: "/health/live" });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(Object.keys(response.json()).sort(), ["service", "status", "timestamp"]);
+  assert.equal(response.json().status, "ok");
+});
+
+test("platform endpoint exposes the versioned browser contract", async () => {
+  const response = await app.inject({ method: "GET", url: "/api/v1/platform/status" });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().apiVersion, "1");
+  assert.equal(response.json().service, "game-platform-api");
+});
+
+test("internal metrics expose process health without application secrets", async () => {
+  await app.inject({ method: "GET", url: "/health/live" });
+  const response = await app.inject({ method: "GET", url: "/internal/metrics" });
+  assert.equal(response.statusCode, 200);
+  assert.match(response.body, /game_platform_http_requests_total/u);
+  assert.match(response.body, /game_platform_http_request_duration_milliseconds_bucket\{le="50"\}/u);
+  assert.match(response.body, /game_platform_spin_request_duration_milliseconds_bucket/u);
+  assert.doesNotMatch(response.body, /DATABASE_URL|password|token/iu);
+});
+
+test("CORS allows the configured web origin", async () => {
+  const response = await app.inject({
+    method: "OPTIONS",
+    url: "/api/v1/platform/status",
+    headers: {
+      origin: "http://localhost:3000",
+      "access-control-request-method": "GET"
+    }
+  });
+
+  assert.equal(response.statusCode, 204);
+  assert.equal(response.headers["access-control-allow-origin"], "http://localhost:3000");
+});
+
+test("login keeps the opaque token out of the response body and in an HttpOnly cookie", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/auth/login",
+    payload: { username: "TestAdmin", password: "a password entered by the user" }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.equal(response.json().sessionToken, undefined);
+  const setCookie = response.headers["set-cookie"];
+  assert.match(Array.isArray(setCookie) ? setCookie.join("; ") : setCookie ?? "", /gp_session=.*HttpOnly.*SameSite=Strict/u);
+});
+
+test("me rejects requests without a session cookie", async () => {
+  const response = await app.inject({ method: "GET", url: "/api/v1/me" });
+
+  assert.equal(response.statusCode, 401);
+  assert.equal(response.json().error.code, "AUTH_REQUIRED");
+});
+
+test("me returns the centrally resolved principal", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/v1/me",
+    headers: { cookie: `gp_session=${"A".repeat(43)}` }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json().permissions, ["SECURITY_VIEW", "WALLET_CREDIT"]);
+});
+
+test("authenticated players can change their password and the session cookie is cleared", async () => {
+  const response = await app.inject({ method: "POST", url: "/api/v1/auth/password", headers: { cookie: `gp_session=${"B".repeat(43)}` }, payload: { currentPassword: "old-password", newPassword: "new-password" } });
+  assert.equal(response.statusCode, 204);
+  assert.deepEqual(receivedPasswordChange, { currentPassword: "old-password", newPassword: "new-password" });
+  const setCookie = response.headers["set-cookie"];
+  assert.match(Array.isArray(setCookie) ? setCookie.join("; ") : setCookie ?? "", /gp_session=;.*Expires=/u);
+});
+
+test("admin routes enforce specific permissions centrally", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/v1/admin/players",
+    headers: { cookie: `gp_session=${"A".repeat(43)}` }
+  });
+
+  assert.equal(response.statusCode, 403);
+  assert.equal(response.json().error.code, "ACCESS_DENIED");
+});
+
+test("audit history uses the dedicated security permission", async () => {
+  const response = await app.inject({
+    method: "GET",
+    url: "/api/v1/admin/audit-logs",
+    headers: { cookie: `gp_session=${"A".repeat(43)}` }
+  });
+
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { auditLogs: [] });
+});
+
+test("player deletion preview serializes balances and requires its dedicated permission", async () => {
+  const denied = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/5fdb5ce8-a3c9-41f7-bd25-4072f67123e1/deletion-preview",
+    headers: { cookie: `gp_session=${"A".repeat(43)}` }
+  });
+  assert.equal(denied.statusCode, 403);
+
+  const allowed = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/5fdb5ce8-a3c9-41f7-bd25-4072f67123e1/deletion-preview",
+    headers: { cookie: `gp_session=${"C".repeat(43)}` }
+  });
+  assert.equal(allowed.statusCode, 200);
+  assert.equal(allowed.json().balance, "25");
+  assert.equal(allowed.json().counts.ledgerEntries, 5);
+});
+
+test("record cleanup validates retention days and requires idempotency for deletion", async () => {
+  const invalidPreview = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/5fdb5ce8-a3c9-41f7-bd25-4072f67123e1/records/deletion-preview",
+    headers: { cookie: `gp_session=${"C".repeat(43)}` },
+    payload: { retentionDays: 0 }
+  });
+  assert.equal(invalidPreview.statusCode, 400);
+
+  const missingKey = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/5fdb5ce8-a3c9-41f7-bd25-4072f67123e1/records/delete",
+    headers: { cookie: `gp_session=${"C".repeat(43)}` },
+    payload: { retentionDays: 30, reason: "Remove expired history" }
+  });
+  assert.equal(missingKey.statusCode, 400);
+
+  const deleted = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/5fdb5ce8-a3c9-41f7-bd25-4072f67123e1/records/delete",
+    headers: { cookie: `gp_session=${"C".repeat(43)}`, "idempotency-key": "records-cleanup-test-01" },
+    payload: { retentionDays: 30, reason: "Remove expired history" }
+  });
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.json().retentionDays, 30);
+  assert.equal(deleted.json().cutoffAt, "2026-07-26T10:00:00.000Z");
+});
+
+test("inactive-player cleanup previews exclusions and executes only bounded idempotent batches", async () => {
+  const preview = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/inactive-deletion-preview",
+    headers: { cookie: `gp_session=${"C".repeat(43)}` },
+    payload: { inactivityDays: 30, includePositiveBalances: false }
+  });
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.json().inactivePlayers, 8);
+  assert.equal(preview.json().activeSessionPlayers, 1);
+  assert.equal(preview.json().positiveBalanceTotal, "75");
+  assert.equal(preview.json().deletablePlayers, 5);
+
+  const invalidBatch = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/delete-inactive",
+    headers: { cookie: `gp_session=${"C".repeat(43)}`, "idempotency-key": "inactive-cleanup-test-01" },
+    payload: { inactivityDays: 30, includePositiveBalances: false, batchSize: 101, reason: "Remove inactive players" }
+  });
+  assert.equal(invalidBatch.statusCode, 400);
+
+  const deleted = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/delete-inactive",
+    headers: { cookie: `gp_session=${"C".repeat(43)}`, "idempotency-key": "inactive-cleanup-test-02" },
+    payload: { inactivityDays: 30, includePositiveBalances: false, batchSize: 50, reason: "Remove inactive players" }
+  });
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.json().deletedPlayers, 5);
+  assert.equal(deleted.json().remainingPlayers, 0);
+});
+
+test("wallet adjustments require and forward an idempotency key", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/5fdb5ce8-a3c9-41f7-bd25-4072f67123e1/wallet/credit",
+    headers: { cookie: `gp_session=${"A".repeat(43)}`, "idempotency-key": "request-0000000001" },
+    payload: { amount: 10, reason: "Support award" }
+  });
+  assert.equal(response.statusCode, 200);
+  assert.equal(receivedIdempotencyKey, "request-0000000001");
+  assert.equal(response.json().wallet.balance, "10");
+  assert.equal(publishedWalletBalance, "10");
+});
+
+test("wallet adjustments reject a missing idempotency key", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/5fdb5ce8-a3c9-41f7-bd25-4072f67123e1/wallet/credit",
+    headers: { cookie: `gp_session=${"A".repeat(43)}` },
+    payload: { amount: 10, reason: "Support award" }
+  });
+  assert.equal(response.statusCode, 400);
+  assert.equal(response.json().error.code, "INVALID_REQUEST");
+});
+
+test("game catalog is authenticated and resolved by the backend", async () => {
+  const response = await app.inject({ method: "GET", url: "/api/v1/games", headers: { cookie: `gp_session=${"A".repeat(43)}` } });
+  assert.equal(response.statusCode, 200);
+  assert.deepEqual(response.json(), { games: [] });
+});
+
+test("paid game start requires idempotency and converts entry coins to bigint", async () => {
+  const response = await app.inject({ method: "POST", url: `/api/v1/games/${gameSession.gameId}/sessions`, headers: { cookie: `gp_session=${"B".repeat(43)}`, "idempotency-key": "game-start-0000001" }, payload: { entryAmount: 10 } });
+  assert.equal(response.statusCode, 200);
+  assert.equal(receivedGameStarts.at(-1)?.entryAmount, 10n);
+  assert.equal(receivedGameStarts.at(-1)?.idempotencyKey, "game-start-0000001");
+  assert.equal(response.json().session.entryAmount, "10");
+});
+
+test("authenticated players receive an initial versioned wallet event", async () => {
+  const origin = await app.listen({ host: "127.0.0.1", port: 0 });
+  const controller = new AbortController();
+  const response = await fetch(`${origin}/api/v1/wallet/events`, {
+    headers: { cookie: `gp_session=${"B".repeat(43)}` },
+    signal: controller.signal
+  });
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/event-stream/u);
+  const reader = response.body?.getReader();
+  assert.notEqual(reader, undefined);
+  const chunk = await reader?.read();
+  const payload = new TextDecoder().decode(chunk?.value);
+  assert.match(payload, /event: wallet/u);
+  assert.match(payload, /"type":"wallet.updated"/u);
+  assert.match(payload, /"version":1/u);
+  controller.abort();
+  await reader?.cancel().catch(() => undefined);
+});

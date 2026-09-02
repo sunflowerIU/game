@@ -1,0 +1,15 @@
+packages:
+  - apps/*
+  - packages/*
+  - games/*
+overrides:
+  deepmerge-ts: 8.0.0
+  esbuild: 0.28.1
+allowBuilds:
+  '@prisma/engines': true
+  argon2: true
+  esbuild: true
+  prisma: true
+  unrs-resolver: true
+minimumReleaseAgeExclude:
+  - '@types/react-dom@19.2.5'

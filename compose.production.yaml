@@ -1,0 +1,172 @@
+name: game-platform-production
+
+x-service-defaults: &service-defaults
+  restart: unless-stopped
+  init: true
+  security_opt:
+    - no-new-privileges:true
+  logging:
+    driver: json-file
+    options:
+      max-size: 10m
+      max-file: "5"
+
+services:
+  nginx:
+    <<: *service-defaults
+    image: nginx:1.30.4-alpine
+    ports:
+      - "80:8080"
+      - "443:8443"
+    environment:
+      PLAYER_HOSTNAME: ${PLAYER_HOSTNAME}
+      ADMIN_HOSTNAME: ${ADMIN_HOSTNAME}
+    command: ["/bin/sh", "-c", "envsubst '$$PLAYER_HOSTNAME $$ADMIN_HOSTNAME' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf && nginx -c /tmp/nginx.conf -g 'daemon off;'" ]
+    volumes:
+      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
+      - ./infrastructure/nginx/cloudflare-real-ip.conf:/etc/nginx/cloudflare-real-ip.conf:ro
+      - ./infrastructure/secrets/cloudflare-origin.pem:/run/secrets/origin.pem:ro
+      - ./infrastructure/secrets/cloudflare-origin-key.pem:/run/secrets/origin-key.pem:ro
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=32m
+      - /var/run:size=1m
+      - /tmp:size=8m
+    depends_on:
+      web:
+        condition: service_healthy
+      admin-web:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/health/live"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    mem_limit: 128m
+    cpus: 0.25
+
+  web:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ""
+        API_INTERNAL_URL: http://server:4000
+        NEXT_PUBLIC_PLAYER_ORIGIN: https://${PLAYER_HOSTNAME}
+    environment:
+      API_INTERNAL_URL: http://server:4000
+    expose:
+      - "3000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+      - /app/apps/web/.next/cache:size=64m,uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    mem_limit: 768m
+    cpus: 0.5
+
+  admin-web:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: admin-web
+      args:
+        NEXT_PUBLIC_API_BASE_URL: ""
+        API_INTERNAL_URL: http://server:4000
+    environment:
+      API_INTERNAL_URL: http://server:4000
+    expose:
+      - "3001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+      - /app/apps/admin-web/.next/cache:size=64m,uid=1000,gid=1000
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3001/"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+      start_period: 15s
+    mem_limit: 768m
+    cpus: 0.5
+
+  server:
+    <<: *service-defaults
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: server
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connect_timeout=10
+      LOG_LEVEL: ${LOG_LEVEL:-info}
+      NODE_ENV: production
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 4000
+      TRUST_PROXY: "true"
+      WEB_ORIGIN: https://${PLAYER_HOSTNAME}
+      ADMIN_ORIGIN: https://${ADMIN_HOSTNAME}
+    expose:
+      - "4000"
+    read_only: true
+    tmpfs:
+      - /tmp:size=32m
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:4000/health/ready"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 20s
+    stop_grace_period: 20s
+    mem_limit: 1g
+    cpus: 0.75
+
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      target: migrate
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connect_timeout=10
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: "no"
+    security_opt:
+      - no-new-privileges:true
+
+  postgres:
+    <<: *service-defaults
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    expose:
+      - "5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    stop_grace_period: 60s
+    shm_size: 256m
+    mem_limit: 1536m
+    cpus: 0.5
+
+volumes:
+  postgres-data:

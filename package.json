@@ -1,0 +1,26 @@
+{
+  "name": "game-platform",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@11.19.0",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "postinstall": "pnpm db:generate",
+    "dev": "pnpm --parallel --filter @game-platform/contracts --filter @game-platform/server --filter @game-platform/web --filter @game-platform/admin-web dev",
+    "build": "pnpm --filter @game-platform/auth build && pnpm --filter @game-platform/admin build && pnpm --filter @game-platform/wallet build && pnpm --filter @game-platform/game-core build && pnpm --filter @game-platform/neon-reels build && pnpm --filter @game-platform/contracts build && pnpm --filter @game-platform/database build && pnpm --filter @game-platform/server build && pnpm --filter @game-platform/web build && pnpm --filter @game-platform/admin-web build",
+    "typecheck": "pnpm -r typecheck",
+    "lint": "pnpm -r lint",
+    "test": "pnpm -r test",
+    "check": "pnpm typecheck && pnpm lint && pnpm test && pnpm build",
+    "db:generate": "pnpm --filter @game-platform/database db:generate",
+    "db:migrate": "pnpm --filter @game-platform/database db:migrate",
+    "db:deploy": "pnpm --filter @game-platform/database db:deploy",
+    "db:seed": "pnpm --filter @game-platform/database db:seed"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "typescript": "6.0.3"
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "name": "@game-platform/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "tsx --test src/*.test.ts src/**/*.test.ts"
+  },
+  "dependencies": {
+    "@fastify/cookie": "11.1.2",
+    "@fastify/cors": "11.3.0",
+    "@fastify/rate-limit": "11.2.0",
+    "@prisma/adapter-pg": "7.9.1",
+    "@prisma/client": "7.9.1",
+    "@game-platform/admin": "workspace:*",
+    "@game-platform/auth": "workspace:*",
+    "@game-platform/contracts": "workspace:*",
+    "@game-platform/database": "workspace:*",
+    "@game-platform/game-core": "workspace:*",
+    "@game-platform/neon-reels": "workspace:*",
+    "@game-platform/wallet": "workspace:*",
+    "argon2": "0.45.1",
+    "dotenv": "17.4.2",
+    "fastify": "5.12.1",
+    "pg": "8.23.0",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "26.2.0",
+    "pino-pretty": "13.1.3",
+    "tsx": "4.23.12",
+    "tsup": "8.5.1",
+    "typescript": "6.0.3"
+  }
+}

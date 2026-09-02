@@ -1,0 +1,14 @@
+node_modules/
+.pnpm-store/
+.next/
+dist/
+coverage/
+.turbo/
+.env
+.env.local
+.env.production
+/infrastructure/secrets/*.pem
+*.log
+*.tsbuildinfo
+/packages/database/src/generated/prisma/
+.DS_Store

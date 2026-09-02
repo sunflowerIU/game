@@ -1,0 +1,107 @@
+name: game-platform
+
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: pnpm --filter @game-platform/web dev --hostname 0.0.0.0
+    environment:
+      API_INTERNAL_URL: http://server:4000
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./apps/web/app:/workspace/apps/web/app
+      - ./apps/web/components:/workspace/apps/web/components
+      - ./apps/web/lib:/workspace/apps/web/lib
+      - ./apps/web/public:/workspace/apps/web/public
+      - ./packages/contracts/src:/workspace/packages/contracts/src
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  admin-web:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: pnpm --filter @game-platform/admin-web dev --hostname 0.0.0.0
+    environment:
+      API_INTERNAL_URL: http://server:4000
+    ports:
+      - "3001:3001"
+    volumes:
+      # Mount source only. Mounting the whole Windows app directory replaces the
+      # container's Linux node_modules with incompatible Windows pnpm links.
+      - ./apps/admin-web/app:/workspace/apps/admin-web/app
+      - ./apps/admin-web/components:/workspace/apps/admin-web/components
+      - ./apps/web/components:/workspace/apps/web/components
+      - ./apps/web/lib:/workspace/apps/web/lib
+      - ./packages/contracts/src:/workspace/packages/contracts/src
+    depends_on:
+      server:
+        condition: service_healthy
+    restart: unless-stopped
+
+  server:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    command: pnpm --filter @game-platform/server dev
+    environment:
+      LOG_LEVEL: info
+      NODE_ENV: development
+      SERVER_HOST: 0.0.0.0
+      SERVER_PORT: 4000
+      WEB_ORIGIN: http://localhost:3000
+      ADMIN_ORIGIN: http://127.0.0.1:3001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-game_platform}:${POSTGRES_PASSWORD:-change-me-for-local-development}@postgres:5432/${POSTGRES_DB:-game_platform}
+    ports:
+      - "127.0.0.1:4000:4000"
+    volumes:
+      - ./apps/server/src:/workspace/apps/server/src
+      - ./packages/admin/src:/workspace/packages/admin/src
+      - ./packages/auth/src:/workspace/packages/auth/src
+      - ./packages/contracts/src:/workspace/packages/contracts/src
+      - ./packages/database/src:/workspace/packages/database/src
+      - ./packages/game-core/src:/workspace/packages/game-core/src
+      - ./packages/wallet/src:/workspace/packages/wallet/src
+      - ./games/neon-reels/src:/workspace/games/neon-reels/src
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:4000/health/ready",
+        ]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:18-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-game_platform}
+      POSTGRES_USER: ${POSTGRES_USER:-game_platform}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-for-local-development}
+    volumes:
+      - postgres-data:/var/lib/postgresql
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5433}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres-data:

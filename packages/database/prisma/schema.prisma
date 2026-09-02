@@ -1,0 +1,410 @@
+generator client {
+  provider            = "prisma-client"
+  output              = "../src/generated/prisma"
+  runtime             = "nodejs"
+  moduleFormat        = "esm"
+  importFileExtension = "ts"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum PrincipalType {
+  PLAYER
+  ADMIN
+}
+
+enum AccountStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum SessionRevocationReason {
+  LOGOUT
+  PASSWORD_CHANGED
+  ACCOUNT_DISABLED
+  ADMIN_REVOKED
+  SECURITY_EVENT
+}
+
+enum LoginOutcome {
+  SUCCESS
+  LOGOUT
+  INVALID_CREDENTIALS
+  ACCOUNT_DISABLED
+  RATE_LIMITED
+}
+
+enum AdminAuditAction {
+  PLAYER_CREATED
+  PLAYER_ENABLED
+  PLAYER_DISABLED
+  PLAYER_PASSWORD_RESET
+  WALLET_CREDITED
+  WALLET_DEBITED
+  GAME_STATUS_CHANGED
+  GAME_CONFIG_UPDATED
+}
+
+enum AdminAuditTargetType {
+  ACCOUNT
+  GAME
+}
+
+enum LedgerEntryType {
+  ADMIN_DEPOSIT
+  ADMIN_DEBIT
+  GAME_ENTRY
+  GAME_REWARD
+  REDEMPTION
+  REFUND
+  BONUS
+  ADJUSTMENT
+}
+
+enum LedgerActorType {
+  ADMIN
+  SYSTEM
+  GAME
+  PLAYER
+}
+
+enum GameStatus {
+  ACTIVE
+  DISABLED
+  MAINTENANCE
+  DEPRECATED
+}
+
+enum GameType {
+  SINGLE_PLAYER
+  MULTIPLAYER
+}
+
+enum GameSessionStatus {
+  CREATED
+  ACTIVE
+  COMPLETED
+  ABANDONED
+  FAILED
+}
+
+enum GameResultOutcome {
+  COMPLETED
+  ABANDONED
+  FAILED
+}
+
+enum SecuritySeverity {
+  INFO
+  WARNING
+  HIGH
+  CRITICAL
+}
+
+enum SecurityEventType {
+  IMPOSSIBLE_INPUT_RATE
+  REPLAYED_SEQUENCE
+  INVALID_SESSION
+  INVALID_GAME_INPUT
+  SESSION_RECOVERED
+}
+
+enum DataCleanupAction {
+  PLAYER_DELETED
+  PLAYER_RECORDS_DELETED
+  INACTIVE_PLAYERS_DELETED
+}
+
+model Account {
+  id                 String                   @id @default(uuid()) @db.Uuid
+  username           String                   @db.VarChar(32)
+  usernameNormalized String                   @unique @db.VarChar(32)
+  type               PrincipalType
+  status             AccountStatus            @default(ACTIVE)
+  disabledAt         DateTime?                @db.Timestamptz(3)
+  createdAt          DateTime                 @default(now()) @db.Timestamptz(3)
+  updatedAt          DateTime                 @updatedAt @db.Timestamptz(3)
+  credential         Credential?
+  playerProfile      PlayerProfile?
+  adminProfile       AdminProfile?
+  wallet             Wallet?
+  ownedGameSessions  GameSession[]            @relation("GameSessionOwner")
+  gameParticipations GameSessionParticipant[]
+  securityEvents     SecurityEvent[]
+  sessions           AuthSession[]
+  loginEvents        LoginEvent[]
+  targetedAuditLogs  AdminAuditLog[]          @relation("AuditAccountTarget")
+
+  @@index([type, status])
+}
+
+model Game {
+  id              String        @id @default(uuid()) @db.Uuid
+  slug            String        @unique @db.VarChar(64)
+  name            String        @db.VarChar(100)
+  status          GameStatus    @default(DISABLED)
+  gameType        GameType
+  activeVersionId String?       @unique @db.Uuid
+  createdAt       DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt       DateTime      @updatedAt @db.Timestamptz(3)
+  versions        GameVersion[] @relation("GameVersions")
+  activeVersion   GameVersion?  @relation("ActiveGameVersion", fields: [activeVersionId], references: [id], onDelete: Restrict)
+  sessions        GameSession[]
+  targetedAuditLogs AdminAuditLog[] @relation("AuditGameTarget")
+}
+
+model GameVersion {
+  id            String        @id @default(uuid()) @db.Uuid
+  gameId        String        @db.Uuid
+  version       String        @db.VarChar(32)
+  configurationRevision Int   @default(1)
+  minimumEntry  BigInt        @default(0)
+  maximumEntry  BigInt        @default(0)
+  configuration Json
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+  game          Game          @relation("GameVersions", fields: [gameId], references: [id], onDelete: Restrict)
+  activeForGame Game?         @relation("ActiveGameVersion")
+  sessions      GameSession[]
+
+  @@unique([gameId, version, configurationRevision])
+  @@index([gameId, createdAt])
+}
+
+model GameSession {
+  id                  String                   @id @default(uuid()) @db.Uuid
+  ownerAccountId      String                   @db.Uuid
+  gameId              String                   @db.Uuid
+  gameVersionId       String                   @db.Uuid
+  gameVersion         String                   @db.VarChar(32)
+  status              GameSessionStatus        @default(CREATED)
+  entryAmount         BigInt
+  startIdempotencyKey String                   @db.VarChar(100)
+  serverInstanceId    String?                  @db.VarChar(100)
+  stateVersion        Int                      @default(0)
+  createdAt           DateTime                 @default(now()) @db.Timestamptz(3)
+  startedAt           DateTime?                @db.Timestamptz(3)
+  completedAt         DateTime?                @db.Timestamptz(3)
+  owner               Account                  @relation("GameSessionOwner", fields: [ownerAccountId], references: [id], onDelete: Restrict)
+  game                Game                     @relation(fields: [gameId], references: [id], onDelete: Restrict)
+  version             GameVersion              @relation(fields: [gameVersionId], references: [id], onDelete: Restrict)
+  participants        GameSessionParticipant[]
+  result              GameResult?
+  securityEvents      SecurityEvent[]
+
+  @@unique([ownerAccountId, startIdempotencyKey])
+  @@index([ownerAccountId, createdAt])
+  @@index([gameId, status, createdAt])
+  @@index([serverInstanceId, status])
+}
+
+model GameResult {
+  id            String            @id @default(uuid()) @db.Uuid
+  gameSessionId String            @unique @db.Uuid
+  outcome       GameResultOutcome
+  score         Int
+  reward        BigInt
+  details       Json
+  createdAt     DateTime          @default(now()) @db.Timestamptz(3)
+  gameSession   GameSession       @relation(fields: [gameSessionId], references: [id], onDelete: Restrict)
+}
+
+model SecurityEvent {
+  id            BigInt            @id @default(autoincrement())
+  type          SecurityEventType
+  severity      SecuritySeverity
+  accountId     String?           @db.Uuid
+  gameSessionId String?           @db.Uuid
+  ipAddress     String            @db.VarChar(45)
+  metadata      Json?
+  createdAt     DateTime          @default(now()) @db.Timestamptz(3)
+  account       Account?          @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  gameSession   GameSession?      @relation(fields: [gameSessionId], references: [id], onDelete: SetNull)
+
+  @@index([accountId, createdAt])
+  @@index([gameSessionId, createdAt])
+  @@index([type, createdAt])
+  @@index([severity, createdAt])
+}
+
+model GameSessionParticipant {
+  gameSessionId String      @db.Uuid
+  accountId     String      @db.Uuid
+  joinedAt      DateTime    @default(now()) @db.Timestamptz(3)
+  gameSession   GameSession @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
+  account       Account     @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  @@id([gameSessionId, accountId])
+  @@index([accountId, joinedAt])
+}
+
+model Wallet {
+  id            String        @id @default(uuid()) @db.Uuid
+  accountId     String        @unique @db.Uuid
+  balance       BigInt        @default(0)
+  version       Int           @default(0)
+  createdAt     DateTime      @default(now()) @db.Timestamptz(3)
+  updatedAt     DateTime      @updatedAt @db.Timestamptz(3)
+  account       Account       @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  ledgerEntries LedgerEntry[]
+}
+
+model LedgerEntry {
+  id             String          @id @default(uuid()) @db.Uuid
+  walletId       String          @db.Uuid
+  type           LedgerEntryType
+  amount         BigInt
+  balanceBefore  BigInt
+  balanceAfter   BigInt
+  referenceType  String          @db.VarChar(64)
+  referenceId    String          @db.VarChar(128)
+  idempotencyKey String          @db.VarChar(100)
+  createdByType  LedgerActorType
+  createdById    String?         @db.Uuid
+  metadata       Json?
+  createdAt      DateTime        @default(now()) @db.Timestamptz(3)
+  wallet         Wallet          @relation(fields: [walletId], references: [id], onDelete: Restrict)
+
+  @@unique([walletId, idempotencyKey])
+  @@index([walletId, createdAt])
+  @@index([referenceType, referenceId])
+}
+
+model Credential {
+  accountId         String   @id @db.Uuid
+  passwordHash      String   @db.VarChar(255)
+  passwordVersion   Int      @default(1)
+  passwordChangedAt DateTime @default(now()) @db.Timestamptz(3)
+  account           Account  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+}
+
+model PlayerProfile {
+  accountId   String    @id @db.Uuid
+  lastLoginAt DateTime? @db.Timestamptz(3)
+  account     Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([lastLoginAt])
+}
+
+model AdminProfile {
+  accountId       String                @id @db.Uuid
+  mfaRequired     Boolean               @default(false)
+  mfaEnrolledAt   DateTime?             @db.Timestamptz(3)
+  account         Account               @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  roleAssignments AdminRoleAssignment[]
+  auditLogs       AdminAuditLog[]
+  cleanupRuns     DataCleanupRun[]
+}
+
+model DataCleanupRun {
+  id                      String            @id @default(uuid()) @db.Uuid
+  idempotencyKey          String            @unique @db.VarChar(100)
+  adminId                 String            @db.Uuid
+  action                  DataCleanupAction
+  targetAccountIdSnapshot String?           @db.Uuid
+  targetUsernameSnapshot  String?           @db.VarChar(32)
+  cutoffAt                DateTime?         @db.Timestamptz(3)
+  recordCounts            Json
+  reason                  String            @db.VarChar(500)
+  ipAddress               String            @db.VarChar(45)
+  userAgent               String?           @db.VarChar(512)
+  createdAt               DateTime          @default(now()) @db.Timestamptz(3)
+  admin                   AdminProfile      @relation(fields: [adminId], references: [accountId], onDelete: Restrict)
+
+  @@index([adminId, createdAt])
+  @@index([action, createdAt])
+  @@index([targetAccountIdSnapshot, createdAt])
+}
+
+model AdminAuditLog {
+  id        BigInt           @id @default(autoincrement())
+  adminId   String           @db.Uuid
+  action    AdminAuditAction
+  targetType AdminAuditTargetType
+  targetAccountId String?    @db.Uuid
+  targetGameId String?       @db.Uuid
+  before    Json?
+  after     Json?
+  reason    String           @db.VarChar(500)
+  ipAddress String           @db.VarChar(45)
+  userAgent String?          @db.VarChar(512)
+  createdAt DateTime         @default(now()) @db.Timestamptz(3)
+  admin     AdminProfile     @relation(fields: [adminId], references: [accountId], onDelete: Restrict)
+  accountTarget Account?     @relation("AuditAccountTarget", fields: [targetAccountId], references: [id], onDelete: Restrict)
+  gameTarget Game?           @relation("AuditGameTarget", fields: [targetGameId], references: [id], onDelete: Restrict)
+
+  @@index([adminId, createdAt])
+  @@index([targetAccountId, createdAt])
+  @@index([targetGameId, createdAt])
+  @@index([action, createdAt])
+}
+
+model Role {
+  id          String                @id @default(uuid()) @db.Uuid
+  name        String                @unique @db.VarChar(64)
+  description String?               @db.VarChar(255)
+  createdAt   DateTime              @default(now()) @db.Timestamptz(3)
+  assignments AdminRoleAssignment[]
+  grants      RolePermissionGrant[]
+}
+
+model Permission {
+  id          String                @id @default(uuid()) @db.Uuid
+  code        String                @unique @db.VarChar(64)
+  description String?               @db.VarChar(255)
+  grants      RolePermissionGrant[]
+}
+
+model AdminRoleAssignment {
+  adminId   String       @db.Uuid
+  roleId    String       @db.Uuid
+  grantedAt DateTime     @default(now()) @db.Timestamptz(3)
+  admin     AdminProfile @relation(fields: [adminId], references: [accountId], onDelete: Cascade)
+  role      Role         @relation(fields: [roleId], references: [id], onDelete: Restrict)
+
+  @@id([adminId, roleId])
+  @@index([roleId])
+}
+
+model RolePermissionGrant {
+  roleId       String     @db.Uuid
+  permissionId String     @db.Uuid
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Restrict)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model AuthSession {
+  id           String                   @id @default(uuid()) @db.Uuid
+  accountId    String                   @db.Uuid
+  tokenHash    String                   @unique @db.Char(64)
+  expiresAt    DateTime                 @db.Timestamptz(3)
+  lastSeenAt   DateTime                 @default(now()) @db.Timestamptz(3)
+  revokedAt    DateTime?                @db.Timestamptz(3)
+  revokeReason SessionRevocationReason?
+  ipAddress    String                   @db.VarChar(45)
+  userAgent    String?                  @db.VarChar(512)
+  createdAt    DateTime                 @default(now()) @db.Timestamptz(3)
+  account      Account                  @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  @@index([accountId, expiresAt])
+  @@index([expiresAt])
+}
+
+model LoginEvent {
+  id                 BigInt       @id @default(autoincrement())
+  accountId          String?      @db.Uuid
+  usernameNormalized String       @db.VarChar(32)
+  outcome            LoginOutcome
+  ipAddress          String       @db.VarChar(45)
+  userAgent          String?      @db.VarChar(512)
+  createdAt          DateTime     @default(now()) @db.Timestamptz(3)
+  account            Account?     @relation(fields: [accountId], references: [id], onDelete: SetNull)
+
+  @@index([usernameNormalized, createdAt])
+  @@index([ipAddress, createdAt])
+  @@index([accountId, createdAt])
+}

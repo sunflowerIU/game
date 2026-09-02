@@ -1,0 +1,25 @@
+FROM node:24-alpine
+
+WORKDIR /workspace
+
+RUN corepack enable && corepack prepare pnpm@11.19.0 --activate
+
+COPY package.json pnpm-lock.yaml* pnpm-workspace.yaml tsconfig.base.json ./
+COPY apps/web/package.json ./apps/web/package.json
+COPY apps/admin-web/package.json ./apps/admin-web/package.json
+COPY apps/server/package.json ./apps/server/package.json
+COPY packages/admin/package.json ./packages/admin/package.json
+COPY packages/auth/package.json ./packages/auth/package.json
+COPY packages/contracts/package.json ./packages/contracts/package.json
+COPY packages/database/package.json ./packages/database/package.json
+COPY packages/database/prisma.config.ts ./packages/database/prisma.config.ts
+COPY packages/database/prisma/schema.prisma ./packages/database/prisma/schema.prisma
+COPY packages/game-core/package.json ./packages/game-core/package.json
+COPY packages/wallet/package.json ./packages/wallet/package.json
+COPY games/neon-reels/package.json ./games/neon-reels/package.json
+
+RUN pnpm install --frozen-lockfile
+
+COPY . .
+
+RUN pnpm db:generate
