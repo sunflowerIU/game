@@ -1,0 +1,122 @@
+name: Publish production images
+
+on:
+  push:
+    branches:
+      - prod
+
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: publish-production-images
+  cancel-in-progress: false
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_OWNER: sunfloweriu
+
+jobs:
+  publish:
+    name: Build and publish images
+    if: github.ref == 'refs/heads/prod'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v4
+
+      - name: Build and publish player image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: web
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=
+            API_INTERNAL_URL=http://server:4000
+            NEXT_PUBLIC_PLAYER_ORIGIN=https://neonstargame.duckdns.org
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/game-web:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/game-web:prod
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=production-images
+
+      - name: Build and publish admin image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: admin-web
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=
+            API_INTERNAL_URL=http://server:4000
+            NEXT_PUBLIC_PLAYER_ORIGIN=https://neonstargame.duckdns.org
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/game-admin-web:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/game-admin-web:prod
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=production-images
+
+      - name: Build and publish server image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: server
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=
+            API_INTERNAL_URL=http://server:4000
+            NEXT_PUBLIC_PLAYER_ORIGIN=https://neonstargame.duckdns.org
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/game-server:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/game-server:prod
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=production-images
+
+      - name: Build and publish migration image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          target: migrate
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            NEXT_PUBLIC_API_BASE_URL=
+            API_INTERNAL_URL=http://server:4000
+            NEXT_PUBLIC_PLAYER_ORIGIN=https://neonstargame.duckdns.org
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/game-migrate:${{ github.sha }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/game-migrate:prod
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+          cache-from: type=gha,scope=production-images
+          cache-to: type=gha,mode=max,scope=production-images
