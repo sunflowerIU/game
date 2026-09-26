@@ -86,7 +86,7 @@ export interface AuthServiceOptions {
 }
 
 const DEFAULT_FAILED_LOGIN_LIMIT = 5;
-const DEFAULT_FAILED_LOGIN_WINDOW_MS = 15 * 60 * 1_000;
+const DEFAULT_FAILED_LOGIN_WINDOW_MS = 60 * 1_000;
 const DEFAULT_ADMIN_SESSION_TTL_MS = 2 * 60 * 60 * 1_000;
 const DEFAULT_SESSION_TTL_MS = 8 * 60 * 60 * 1_000;
 
