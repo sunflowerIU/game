@@ -14,6 +14,8 @@ import { registerWalletRoutes, type WalletApplication } from "./wallet-routes.js
 import { registerGameRoutes, type GameCatalogApplication } from "./game-routes.js";
 import { registerGameSessionRoutes, type GameSessionApplication } from "./game-session-routes.js";
 import { NeonReelsError } from "@game-platform/neon-reels";
+import { NeonMinesRequestError } from "@game-platform/contracts";
+import { NeonMinesError } from "./adapters/prisma-neon-mines-repository.js";
 import { registerPlatformAdminRoutes, type PlatformAdminService } from "./platform-admin-routes.js";
 import { registerObservability } from "./observability.js";
 import { WalletEventBroker } from "./wallet-events.js";
@@ -91,7 +93,8 @@ export function buildApp(config: ServerConfig, dependencies: AppDependencies): F
   app.get("/health/ready", {
     schema: { response: { 200: healthResponseSchema } }
   }, async () => {
-    await dependencies.readinessCheck();
+    try { await dependencies.readinessCheck(); }
+    catch { throw new AppError("NOT_READY", 503, "Service dependencies are not ready"); }
     return {
       status: "ok" as const,
       service: "server" as const,
@@ -139,6 +142,11 @@ export function buildApp(config: ServerConfig, dependencies: AppDependencies): F
 }
 
 function mapError(error: unknown): AppError {
+  if (error instanceof NeonMinesRequestError) return new AppError("INVALID_REQUEST", 400, error.message);
+  if (error instanceof NeonMinesError) {
+    const status = error.code === "ACCESS_DENIED" ? 403 : error.code === "SESSION_NOT_FOUND" || error.code === "GAME_NOT_AVAILABLE" ? 404 : error.code === "INSUFFICIENT_BALANCE" ? 422 : error.code === "INVALID_ENTRY" || error.code === "INVALID_GAME_INPUT" ? 400 : 409;
+    return new AppError(error.code, status, error.message);
+  }
   if (error instanceof AppError) return error;
   if (error instanceof AuthError) {
     const statusCode = error.code === "RATE_LIMITED" ? 429 : error.code === "ACCESS_DENIED" ? 403 : error.code === "INVALID_PASSWORD" ? 400 : 401;

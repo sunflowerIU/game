@@ -7,6 +7,18 @@ const migrationUrl = new URL(
   import.meta.url
 );
 
+test("Mines persistence is bounded, constrained, cascades with session cleanup, and launches disabled", async () => {
+  const migration = await readFile(new URL("../prisma/migrations/20260903000000_neon_mines_foundation/migration.sql", import.meta.url), "utf8");
+  assert.match(migration, /PRIMARY KEY \("gameSessionId"\)/u);
+  assert.match(migration, /jsonb_typeof\("engineSnapshot"\) = 'object'/u);
+  assert.match(migration, /GameSessionState_command_check/u);
+  assert.match(migration, /GameSessionState_sequence_check/u);
+  assert.match(migration, /GameSessionState_expiry_check/u);
+  assert.match(migration, /REFERENCES "GameSession"\("id"\) ON DELETE CASCADE/u);
+  assert.match(migration, /'neon-mines', 'Neon Mines', 'DISABLED'/u);
+  assert.doesNotMatch(migration, /"status" = 'ACTIVE'/u);
+});
+
 test("identity migration retains database-enforced security invariants", async () => {
   const migration = await readFile(migrationUrl, "utf8");
 

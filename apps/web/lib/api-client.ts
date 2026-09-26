@@ -33,3 +33,10 @@ export async function apiRequest<T>(path: string, init: RequestInit = {}): Promi
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
+
+export async function timedApiRequest<T>(path: string, init: RequestInit = {}, timeoutMs = 15_000): Promise<T> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try { return await apiRequest<T>(path, { ...init, signal: controller.signal }); }
+  finally { clearTimeout(timer); }
+}

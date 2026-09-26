@@ -1,14 +1,21 @@
-node_modules/
-.pnpm-store/
-.next/
-dist/
-coverage/
-.turbo/
+/backups/
+node_modules
+
+# Local environment files may contain credentials.
 .env
-.env.local
-.env.production
-/infrastructure/secrets/*.pem
-*.log
+.env.*
+!.env.example
+!.env.production.example
+
+# Package-manager and framework caches.
+/.pnpm-store/
+.pnpm-store\v11
+**/.next/
 *.tsbuildinfo
-/packages/database/src/generated/prisma/
-.DS_Store
+
+# Reproducible compiler and generated-client output.
+**/dist/
+/packages/database/src/generated/
+
+# Test output.
+coverage/

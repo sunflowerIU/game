@@ -1,6 +1,6 @@
-import type { AdminAuditRecord, InactivePlayerCleanupPreview, InactivePlayerCleanupResult, PlayerDeletionPreview, PlayerDeletionResult, PlayerRecord, PlayerRecordCleanupPreview, PlayerRecordCleanupResult } from "@game-platform/admin";
+import type { AdminAuditRecord, InactivePlayerCleanupPreview, InactivePlayerCleanupResult, PlayerDeletionPreview, PlayerDeletionResult, PlayerRecord, PlayerRecordCleanupPreview, PlayerRecordCleanupResult, SessionCleanupPreview, SessionCleanupResult } from "@game-platform/admin";
 import type { AuthorizedPrincipal } from "@game-platform/auth";
-import type { AdminAuditListResponse, AdminAuditSummary, InactivePlayerCleanupPreviewResponse, InactivePlayerCleanupResponse, PlayerDeletionPreviewResponse, PlayerDeletionResponse, PlayerListResponse, PlayerRecordCleanupPreviewResponse, PlayerRecordCleanupResponse, PlayerSummary } from "@game-platform/contracts";
+import type { AdminAuditListResponse, AdminAuditSummary, InactivePlayerCleanupPreviewResponse, InactivePlayerCleanupResponse, PlayerDeletionPreviewResponse, PlayerDeletionResponse, PlayerListResponse, PlayerRecordCleanupPreviewResponse, PlayerRecordCleanupResponse, PlayerSummary, SessionCleanupPreviewResponse, SessionCleanupResponse } from "@game-platform/contracts";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 interface CreatePlayerBody { readonly username: string; readonly password: string; readonly reason: string }
@@ -11,6 +11,7 @@ interface RetentionPreviewBody { readonly retentionDays: number }
 interface RetentionDeleteBody extends RetentionPreviewBody { readonly reason: string }
 interface InactivePreviewBody { readonly inactivityDays: number; readonly includePositiveBalances: boolean }
 interface InactiveDeleteBody extends InactivePreviewBody { readonly batchSize: number; readonly reason: string }
+interface SessionDeleteBody extends RetentionPreviewBody { readonly batchSize: number; readonly reason: string }
 interface IdempotencyHeaders { readonly "idempotency-key": string }
 interface PlayerParams { readonly playerId: string }
 
@@ -102,6 +103,22 @@ const inactiveCleanupResponseSchema = {
     remainingPlayers: { type: "integer", minimum: 0 }
   }
 } as const;
+const sessionCountsSchema = {
+  type: "object", additionalProperties: false,
+  required: ["authSessions", "gameSessions", "gameParticipations", "gameResults", "securityEvents"],
+  properties: {
+    authSessions: { type: "integer", minimum: 0 }, gameSessions: { type: "integer", minimum: 0 },
+    gameParticipations: { type: "integer", minimum: 0 }, gameResults: { type: "integer", minimum: 0 }, securityEvents: { type: "integer", minimum: 0 }
+  }
+} as const;
+const sessionCleanupPreviewSchema = {
+  type: "object", additionalProperties: false, required: ["retentionDays", "cutoffAt", "counts"],
+  properties: { retentionDays: retentionDaysProperty, cutoffAt: { type: "string", format: "date-time" }, counts: sessionCountsSchema }
+} as const;
+const sessionCleanupResponseSchema = {
+  type: "object", additionalProperties: false, required: ["cleanupRunId", "retentionDays", "cutoffAt", "batchSize", "counts", "remaining"],
+  properties: { ...sessionCleanupPreviewSchema.properties, cleanupRunId: { type: "string", format: "uuid" }, batchSize: { type: "integer", minimum: 1, maximum: 1000 }, remaining: sessionCountsSchema }
+} as const;
 const playerResponseSchema = {
   type: "object",
   additionalProperties: false,
@@ -145,6 +162,8 @@ export interface AdminApplication {
   deletePlayerRecords(principal: AuthorizedPrincipal, input: RetentionDeleteBody & PlayerParams & { readonly idempotencyKey: string } & ReturnType<typeof requestContext>): Promise<PlayerRecordCleanupResult>;
   previewInactivePlayerCleanup(principal: AuthorizedPrincipal, input: InactivePreviewBody): Promise<InactivePlayerCleanupPreview>;
   deleteInactivePlayerBatch(principal: AuthorizedPrincipal, input: InactiveDeleteBody & { readonly idempotencyKey: string } & ReturnType<typeof requestContext>): Promise<InactivePlayerCleanupResult>;
+  previewSessionCleanup(principal: AuthorizedPrincipal, input: RetentionPreviewBody): Promise<SessionCleanupPreview>;
+  deleteSessionBatch(principal: AuthorizedPrincipal, input: SessionDeleteBody & { readonly idempotencyKey: string } & ReturnType<typeof requestContext>): Promise<SessionCleanupResult>;
 }
 
 export async function registerAdminRoutes(app: FastifyInstance, admin: AdminApplication): Promise<void> {
@@ -179,6 +198,27 @@ export async function registerAdminRoutes(app: FastifyInstance, admin: AdminAppl
       response: { 200: inactiveCleanupResponseSchema }
     }
   }, async (request) => toInactivePlayerCleanupResponse(await admin.deleteInactivePlayerBatch(requirePrincipal(request), {
+    ...request.body,
+    idempotencyKey: request.headers["idempotency-key"],
+    ...requestContext(request)
+  })));
+
+  app.post<{ Body: RetentionPreviewBody; Reply: SessionCleanupPreviewResponse }>("/api/v1/admin/sessions/deletion-preview", {
+    preHandler: app.authorize("DATA_RETENTION_MANAGE"),
+    schema: {
+      body: { type: "object", additionalProperties: false, required: ["retentionDays"], properties: { retentionDays: retentionDaysProperty } },
+      response: { 200: sessionCleanupPreviewSchema }
+    }
+  }, async (request) => toSessionCleanupPreviewResponse(await admin.previewSessionCleanup(requirePrincipal(request), request.body)));
+
+  app.post<{ Body: SessionDeleteBody; Headers: IdempotencyHeaders; Reply: SessionCleanupResponse }>("/api/v1/admin/sessions/delete", {
+    preHandler: app.authorize("DATA_RETENTION_MANAGE"),
+    schema: {
+      headers: headersSchema,
+      body: { type: "object", additionalProperties: false, required: ["retentionDays", "batchSize", "reason"], properties: { retentionDays: retentionDaysProperty, batchSize: { type: "integer", minimum: 1, maximum: 1000 }, reason: reasonProperty } },
+      response: { 200: sessionCleanupResponseSchema }
+    }
+  }, async (request) => toSessionCleanupResponse(await admin.deleteSessionBatch(requirePrincipal(request), {
     ...request.body,
     idempotencyKey: request.headers["idempotency-key"],
     ...requestContext(request)
@@ -309,4 +349,12 @@ function toInactivePlayerCleanupPreviewResponse(preview: InactivePlayerCleanupPr
 
 function toInactivePlayerCleanupResponse(result: InactivePlayerCleanupResult): InactivePlayerCleanupResponse {
   return { ...result, cutoffAt: result.cutoffAt.toISOString(), deletedBalance: result.deletedBalance.toString() };
+}
+
+function toSessionCleanupPreviewResponse(preview: SessionCleanupPreview): SessionCleanupPreviewResponse {
+  return { ...preview, cutoffAt: preview.cutoffAt.toISOString() };
+}
+
+function toSessionCleanupResponse(result: SessionCleanupResult): SessionCleanupResponse {
+  return { ...result, cutoffAt: result.cutoffAt.toISOString() };
 }

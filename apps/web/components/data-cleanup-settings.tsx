@@ -1,6 +1,6 @@
 "use client";
 
-import type { InactivePlayerCleanupPreviewResponse, InactivePlayerCleanupResponse } from "@game-platform/contracts";
+import type { InactivePlayerCleanupPreviewResponse, InactivePlayerCleanupResponse, SessionCleanupCounts, SessionCleanupPreviewResponse, SessionCleanupResponse } from "@game-platform/contracts";
 import { useRef, useState, type FormEvent } from "react";
 import { ApiClientError, apiRequest } from "../lib/api-client";
 import { formatCents } from "../lib/money";
@@ -141,8 +141,76 @@ export function DataCleanupSettings({ canManageRetention, onPlayersDeleted }: Da
         </div>}
       </div>
     </section>
+    <SessionCleanupPanel />
   </div>;
 }
+
+function SessionCleanupPanel() {
+  const { showToast } = useToast();
+  const [retentionDays, setRetentionDays] = useState(90);
+  const [batchSize, setBatchSize] = useState(500);
+  const [preview, setPreview] = useState<SessionCleanupPreviewResponse | null>(null);
+  const [lastResult, setLastResult] = useState<SessionCleanupResponse | null>(null);
+  const [pending, setPending] = useState(false);
+  const attempt = useRef<{ idempotencyKey: string; payload: { retentionDays: number; batchSize: number; reason: FormDataEntryValue | null } } | null>(null);
+
+  async function previewCleanup(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setPending(true);
+    try {
+      const result = await apiRequest<SessionCleanupPreviewResponse>("/api/v1/admin/sessions/deletion-preview", { method: "POST", body: JSON.stringify({ retentionDays }) });
+      setPreview(result); setLastResult(null); attempt.current = null;
+    } catch (caught: unknown) { showToast(errorMessage(caught), "error"); } finally { setPending(false); }
+  }
+
+  async function deleteSessions(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); if (preview === null || sessionCleanupTotal(preview.counts) === 0) return;
+    const data = new FormData(event.currentTarget);
+    const currentAttempt = attempt.current ?? { idempotencyKey: crypto.randomUUID(), payload: { retentionDays: preview.retentionDays, batchSize, reason: data.get("reason") } };
+    attempt.current = currentAttempt; setPending(true);
+    try {
+      const result = await apiRequest<SessionCleanupResponse>("/api/v1/admin/sessions/delete", { method: "POST", headers: { "idempotency-key": currentAttempt.idempotencyKey }, body: JSON.stringify(currentAttempt.payload) });
+      attempt.current = null; setLastResult(result);
+      showToast(`${result.counts.authSessions.toLocaleString()} authentication and ${result.counts.gameSessions.toLocaleString()} game sessions deleted.`, "success");
+      try {
+        const refreshed = await apiRequest<SessionCleanupPreviewResponse>("/api/v1/admin/sessions/deletion-preview", { method: "POST", body: JSON.stringify({ retentionDays: preview.retentionDays }) });
+        setPreview(refreshed);
+      } catch {
+        setPreview(null);
+        showToast("Session deletion succeeded, but the preview could not be refreshed. Preview again before another batch.", "error");
+      }
+    } catch (caught: unknown) {
+      if (caught instanceof ApiClientError && caught.status >= 400 && caught.status < 500) attempt.current = null;
+      showToast(errorMessage(caught), "error");
+    } finally { setPending(false); }
+  }
+
+  return <section className="overflow-hidden rounded-2xl border border-white/10 bg-[#10151d]">
+    <header className="border-b border-white/10 px-5 py-4"><h3 className="font-bold text-white">Clean up old sessions</h3><p className="mt-1 text-xs text-slate-500">Remove expired or revoked authentication sessions and terminal game sessions. Active sessions and wallet ledger entries are always preserved.</p></header>
+    <div className="p-5">
+      <form className="grid items-end gap-4 sm:grid-cols-[minmax(0,1fr)_auto]" onSubmit={previewCleanup}>
+        <NumberField label="Keep session history for" suffix="days" value={retentionDays} min={1} max={3650} onChange={(value) => { setRetentionDays(value); setPreview(null); setLastResult(null); attempt.current = null; }} />
+        <button className="rounded-lg bg-lime-300 px-5 py-3 text-sm font-bold text-slate-950 transition hover:bg-lime-200 disabled:opacity-50" disabled={pending}>{pending ? "Checking…" : "Preview sessions"}</button>
+      </form>
+      {preview && <div className="mt-6 space-y-5 border-t border-white/10 pt-5">
+        <p className="text-xs text-slate-400">Only inactive session records on or before <strong className="text-slate-200">{new Date(preview.cutoffAt).toLocaleString()}</strong> are eligible.</p>
+        <SessionCounts counts={preview.counts} />
+        {lastResult && <div className="rounded-xl border border-lime-300/20 bg-lime-300/5 p-4 text-sm text-slate-300"><strong className="text-lime-300">Last batch completed:</strong> {sessionCleanupTotal(lastResult.counts).toLocaleString()} records deleted. {sessionCleanupTotal(lastResult.remaining).toLocaleString()} eligible records remain.</div>}
+        {sessionCleanupTotal(preview.counts) === 0 ? <p className="rounded-xl border border-white/10 p-4 text-center text-sm text-slate-500">No expired or terminal sessions match this retention period.</p> : <form className="space-y-4 rounded-xl border border-red-300/20 bg-red-300/5 p-4" onSubmit={deleteSessions}>
+          <div className="grid gap-4 sm:grid-cols-2"><NumberField label="Maximum of each session type" value={batchSize} min={1} max={1000} onChange={setBatchSize} /><label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">Cleanup reason<input className="mt-2 w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 text-sm normal-case text-white outline-none focus:border-red-300/50" name="reason" minLength={3} defaultValue={`Delete session records older than ${preview.retentionDays} days`} required /></label></div>
+          <label className="flex items-start gap-3 text-sm text-red-100"><input className="mt-0.5 size-4 accent-red-400" type="checkbox" required /><span>I understand that expired authentication sessions and completed game history in this batch will be permanently removed.</span></label>
+          <button className="w-full rounded-lg bg-red-400 px-4 py-3 text-sm font-bold text-white transition hover:bg-red-300 disabled:opacity-50" disabled={pending}>{pending ? "Deleting sessions…" : "Delete session batch"}</button>
+        </form>}
+      </div>}
+    </div>
+  </section>;
+}
+
+function SessionCounts({ counts }: Readonly<{ counts: SessionCleanupCounts }>) {
+  const rows: readonly [string, number][] = [["Authentication sessions", counts.authSessions], ["Game sessions", counts.gameSessions], ["Participants", counts.gameParticipations], ["Game results", counts.gameResults], ["Linked security events", counts.securityEvents]];
+  return <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{rows.map(([label, value]) => <CleanupMetric key={label} label={label} value={value.toLocaleString()} danger={value > 0} />)}</div>;
+}
+
+function sessionCleanupTotal(counts: SessionCleanupCounts): number { return counts.authSessions + counts.gameSessions + counts.gameParticipations + counts.gameResults + counts.securityEvents; }
 
 function NumberField({ label, suffix, value, min, max, onChange }: Readonly<{ label: string; suffix?: string; value: number; min: number; max: number; onChange: (value: number) => void }>) {
   return <label className="block text-xs font-semibold uppercase tracking-wider text-slate-500">{label}<span className="relative mt-2 block"><input className="w-full rounded-lg border border-white/10 bg-black/20 px-3 py-2.5 pr-14 text-sm text-white outline-none focus:border-lime-300/50" type="number" min={min} max={max} step="1" value={value} onChange={(event) => onChange(Number(event.target.value))} required />{suffix && <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-normal normal-case text-slate-500">{suffix}</span>}</span></label>;

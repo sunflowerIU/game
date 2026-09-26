@@ -115,6 +115,7 @@ enum DataCleanupAction {
   PLAYER_DELETED
   PLAYER_RECORDS_DELETED
   INACTIVE_PLAYERS_DELETED
+  SESSION_RECORDS_DELETED
 }
 
 model Account {
@@ -191,12 +192,29 @@ model GameSession {
   version             GameVersion              @relation(fields: [gameVersionId], references: [id], onDelete: Restrict)
   participants        GameSessionParticipant[]
   result              GameResult?
+  privateState        GameSessionState?
   securityEvents      SecurityEvent[]
 
   @@unique([ownerAccountId, startIdempotencyKey])
   @@index([ownerAccountId, createdAt])
   @@index([gameId, status, createdAt])
+  @@index([status, completedAt])
   @@index([serverInstanceId, status])
+}
+
+// One bounded server-private snapshot per durable game session, not a move log.
+model GameSessionState {
+  gameSessionId          String      @id @db.Uuid
+  engineSnapshot         Json
+  lastSequence           Int         @default(0)
+  lastCommandId          String?     @db.Uuid
+  lastCommandFingerprint String?     @db.Char(64)
+  expiresAt              DateTime?   @db.Timestamptz(3)
+  createdAt              DateTime    @default(now()) @db.Timestamptz(3)
+  updatedAt              DateTime    @updatedAt @db.Timestamptz(3)
+  gameSession            GameSession @relation(fields: [gameSessionId], references: [id], onDelete: Cascade)
+
+  @@index([expiresAt])
 }
 
 model GameResult {
@@ -392,6 +410,7 @@ model AuthSession {
 
   @@index([accountId, expiresAt])
   @@index([expiresAt])
+  @@index([revokedAt])
 }
 
 model LoginEvent {

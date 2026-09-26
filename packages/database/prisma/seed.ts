@@ -49,7 +49,35 @@ try {
       }
     }
   });
-  await prisma.game.update({ where: { id: neonReels.id }, data: { activeVersionId: neonReelsVersion.id, status: "ACTIVE" } });
+  // Seeding is repeatable and must not roll back a later immutable configuration
+  // revision or override an administrator's availability decision.
+  if (neonReels.activeVersionId === null) {
+    await prisma.game.update({ where: { id: neonReels.id }, data: { activeVersionId: neonReelsVersion.id } });
+  }
+
+  const neonMines = await prisma.game.upsert({
+    where: { slug: "neon-mines" },
+    update: {},
+    create: { slug: "neon-mines", name: "Neon Mines", gameType: "SINGLE_PLAYER", status: "DISABLED" }
+  });
+  const neonMinesVersion = await prisma.gameVersion.upsert({
+    where: { gameId_version_configurationRevision: { gameId: neonMines.id, version: "1.0.0", configurationRevision: 1 } },
+    update: {},
+    create: {
+      gameId: neonMines.id, version: "1.0.0", minimumEntry: 10n, maximumEntry: 500n,
+      configuration: {
+        boardTiles: 25, returnBps: 9_600, maximumMultiplierBps: 5_000_000, maximumPayoutCents: 50_000,
+        wagerDenominationsCents: [10, 25, 50, 100, 200, 500],
+        difficulties: {
+          EASY: { mines: 3, maximumWagerCents: 500 }, MEDIUM: { mines: 5, maximumWagerCents: 500 },
+          HARD: { mines: 10, maximumWagerCents: 200 }, EXPERT: { mines: 15, maximumWagerCents: 100 }
+        }
+      }
+    }
+  });
+  if (neonMines.activeVersionId === null) {
+    await prisma.game.update({ where: { id: neonMines.id }, data: { activeVersionId: neonMinesVersion.id } });
+  }
 
   const username = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim();
   const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;

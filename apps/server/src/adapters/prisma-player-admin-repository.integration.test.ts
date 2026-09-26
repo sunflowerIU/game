@@ -377,6 +377,62 @@ test("inactive-player cleanup excludes active sessions and positive balances, de
   }
 });
 
+test("global session cleanup deletes only expired auth and terminal game sessions while preserving active data", {
+  skip: process.env.RUN_DATABASE_INTEGRATION_TESTS !== "true"
+}, async () => {
+  const databaseUrl = process.env.DATABASE_URL;
+  if (databaseUrl === undefined) throw new Error("DATABASE_URL is required");
+  const database = createDatabaseClient(databaseUrl);
+  const suffix = randomBytes(4).toString("hex");
+  const oldAt = new Date("2000-01-01T10:00:00.000Z");
+  const recentAt = new Date("2026-09-01T10:00:00.000Z");
+  const cutoffAt = new Date("2001-01-01T10:00:00.000Z");
+  let player: { id: string; username: string } | null = null;
+  const cleanupRunIds: string[] = [];
+  let adminId: string | null = null;
+  try {
+    const [admin, game] = await Promise.all([
+      database.account.findFirst({ where: { type: "ADMIN" }, select: { id: true } }),
+      database.game.findFirst({ where: { activeVersionId: { not: null } }, select: { id: true, activeVersion: { select: { id: true, version: true } } } })
+    ]);
+    if (admin === null || game?.activeVersion === null || game?.activeVersion === undefined) throw new Error("Seeded administrator and active game are required");
+    adminId = admin.id;
+    player = await createCleanupPlayer(database, `session_${suffix}`, oldAt, oldAt, 0n);
+    await database.authSession.createMany({ data: [
+      { accountId: player.id, tokenHash: `${suffix}a`.padEnd(64, "a"), expiresAt: new Date("2000-01-02T10:00:00.000Z"), lastSeenAt: oldAt, ipAddress: "127.0.0.1", createdAt: oldAt },
+      { accountId: player.id, tokenHash: `${suffix}b`.padEnd(64, "b"), expiresAt: new Date("2027-01-01T10:00:00.000Z"), lastSeenAt: recentAt, ipAddress: "127.0.0.1", createdAt: recentAt }
+    ] });
+    const terminal = await database.gameSession.create({ data: {
+      ownerAccountId: player.id, gameId: game.id, gameVersionId: game.activeVersion.id, gameVersion: game.activeVersion.version,
+      status: "COMPLETED", entryAmount: 1n, startIdempotencyKey: `session:${suffix}:terminal`, startedAt: oldAt, completedAt: oldAt,
+      participants: { create: { accountId: player.id, joinedAt: oldAt } }, result: { create: { outcome: "COMPLETED", score: 10, reward: 0n, details: {}, createdAt: oldAt } }
+    } });
+    const active = await database.gameSession.create({ data: {
+      ownerAccountId: player.id, gameId: game.id, gameVersionId: game.activeVersion.id, gameVersion: game.activeVersion.version,
+      status: "ACTIVE", entryAmount: 1n, startIdempotencyKey: `session:${suffix}:active`, startedAt: recentAt,
+      participants: { create: { accountId: player.id, joinedAt: recentAt } }
+    } });
+    await database.securityEvent.create({ data: { type: "INVALID_GAME_INPUT", severity: "WARNING", accountId: player.id, gameSessionId: terminal.id, ipAddress: "127.0.0.1", createdAt: oldAt } });
+
+    const repository = new PrismaPlayerAdminRepository(database);
+    const preview = await repository.getSessionCleanupPreview({ retentionDays: 90, cutoffAt });
+    assert.ok(preview.counts.authSessions >= 1);
+    assert.ok(preview.counts.gameSessions >= 1);
+    const result = await repository.deleteSessionBatch({ retentionDays: 90, cutoffAt, batchSize: 1000, idempotencyKey: `session:${suffix}:cleanup`, audit: { adminId: admin.id, reason: "Delete old session fixtures", ipAddress: "127.0.0.1", userAgent: "test", occurredAt: recentAt } });
+    cleanupRunIds.push(result.cleanupRunId);
+    assert.equal(await database.authSession.count({ where: { accountId: player.id } }), 1);
+    assert.equal(await database.gameSession.findUnique({ where: { id: terminal.id } }), null);
+    assert.notEqual(await database.gameSession.findUnique({ where: { id: active.id } }), null);
+  } finally {
+    if (player !== null && adminId !== null && await database.account.findUnique({ where: { id: player.id }, select: { id: true } }) !== null) {
+      const finalRun = await new PrismaPlayerAdminRepository(database).deletePlayer({ playerId: player.id, expectedUsernameNormalized: player.username, allowPositiveBalance: true, idempotencyKey: `session:${suffix}:final`, audit: { adminId, reason: "Remove session cleanup fixture", ipAddress: "127.0.0.1", userAgent: "test", occurredAt: new Date() } });
+      if (finalRun !== null) cleanupRunIds.push(finalRun.cleanupRunId);
+    }
+    if (cleanupRunIds.length > 0) await database.dataCleanupRun.deleteMany({ where: { id: { in: cleanupRunIds } } });
+    await database.$disconnect();
+  }
+});
+
 async function createCleanupPlayer(database: ReturnType<typeof createDatabaseClient>, username: string, createdAt: Date, lastLoginAt: Date | null, balance: bigint): Promise<{ id: string; username: string }> {
   const player = await database.account.create({ data: {
     username,

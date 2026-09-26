@@ -14,6 +14,7 @@ class FakeRepository implements PlayerAdminRepository {
   public lastDelete: Parameters<PlayerAdminRepository["deletePlayer"]>[0] | null = null;
   public lastRecordCleanup: Parameters<PlayerAdminRepository["deletePlayerRecords"]>[0] | null = null;
   public lastInactiveCleanup: Parameters<PlayerAdminRepository["deleteInactivePlayerBatch"]>[0] | null = null;
+  public lastSessionCleanup: Parameters<PlayerAdminRepository["deleteSessionBatch"]>[0] | null = null;
   public async listPlayers(): Promise<readonly PlayerRecord[]> { return [player]; }
   public async listAuditLogs(): Promise<readonly AdminAuditRecord[]> { return []; }
   public async createPlayer(input: Parameters<PlayerAdminRepository["createPlayer"]>[0]): Promise<PlayerRecord> { this.lastCreate = input; return player; }
@@ -25,6 +26,8 @@ class FakeRepository implements PlayerAdminRepository {
   public async deletePlayerRecords(input: Parameters<PlayerAdminRepository["deletePlayerRecords"]>[0]): Promise<PlayerRecordCleanupResult | null> { this.lastRecordCleanup = input; return { cleanupRunId: "run-2", playerId: player.id, username: player.username, retentionDays: input.retentionDays, cutoffAt: input.cutoffAt, counts: deletionCounts }; }
   public async getInactivePlayerCleanupPreview(input: Parameters<PlayerAdminRepository["getInactivePlayerCleanupPreview"]>[0]): Promise<InactivePlayerCleanupPreview> { return { ...input, inactivePlayers: 5, activeSessionPlayers: 1, positiveBalancePlayers: 2, positiveBalanceTotal: 50n, deletablePlayers: input.includePositiveBalances ? 4 : 2 }; }
   public async deleteInactivePlayerBatch(input: Parameters<PlayerAdminRepository["deleteInactivePlayerBatch"]>[0]): Promise<InactivePlayerCleanupResult> { this.lastInactiveCleanup = input; return { cleanupRunId: "run-3", inactivityDays: input.inactivityDays, cutoffAt: input.cutoffAt, includePositiveBalances: input.includePositiveBalances, batchSize: input.batchSize, deletedPlayers: 2, deletedBalance: 0n, deletedRecords: deletionCounts, remainingPlayers: 0 }; }
+  public async getSessionCleanupPreview(input: Parameters<PlayerAdminRepository["getSessionCleanupPreview"]>[0]) { return { ...input, counts: { authSessions: 2, gameSessions: 1, gameParticipations: 1, gameResults: 1, securityEvents: 0 } }; }
+  public async deleteSessionBatch(input: Parameters<PlayerAdminRepository["deleteSessionBatch"]>[0]) { this.lastSessionCleanup = input; const counts = { authSessions: 2, gameSessions: 1, gameParticipations: 1, gameResults: 1, securityEvents: 0 }; return { cleanupRunId: "run-4", retentionDays: input.retentionDays, cutoffAt: input.cutoffAt, batchSize: input.batchSize, counts, remaining: { authSessions: 0, gameSessions: 0, gameParticipations: 0, gameResults: 0, securityEvents: 0 } }; }
 }
 
 const deletionCounts = { authSessions: 1, loginEvents: 2, securityEvents: 3, ownedGameSessions: 4, gameParticipations: 4, gameResults: 4, ledgerEntries: 5, adminAuditLogs: 6 };
@@ -169,4 +172,14 @@ test("inactive-player deletion validates batch size and forwards a bounded idemp
     ipAddress: "127.0.0.1",
     userAgent: null
   }), (error: unknown) => error instanceof PlayerAdminError && error.code === "INVALID_REQUEST");
+});
+
+test("session cleanup preserves a fixed cutoff and enforces bounded batches", async () => {
+  const repository = new FakeRepository();
+  const service = new PlayerAdminService(repository, hasher, { now: () => now });
+  const preview = await service.previewSessionCleanup(admin, { retentionDays: 90 });
+  assert.equal(preview.cutoffAt.toISOString(), "2026-05-27T10:00:00.000Z");
+  await service.deleteSessionBatch(admin, { retentionDays: 90, batchSize: 500, idempotencyKey: "session-cleanup:test:01", reason: "Remove old sessions", ipAddress: "127.0.0.1", userAgent: null });
+  assert.equal(repository.lastSessionCleanup?.batchSize, 500);
+  await assert.rejects(service.deleteSessionBatch(admin, { retentionDays: 90, batchSize: 1001, idempotencyKey: "session-cleanup:test:02", reason: "Remove old sessions", ipAddress: "127.0.0.1", userAgent: null }), (error: unknown) => error instanceof PlayerAdminError && error.code === "INVALID_REQUEST");
 });

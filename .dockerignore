@@ -5,6 +5,8 @@ node_modules
 dist
 **/dist
 .git
+.pnpm-store
+.turbo
 .env
 .env.local
 .env.production

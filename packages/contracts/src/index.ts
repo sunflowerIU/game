@@ -107,6 +107,26 @@ export interface InactivePlayerCleanupResponse {
   readonly remainingPlayers: number;
 }
 
+export interface SessionCleanupCounts {
+  readonly authSessions: number;
+  readonly gameSessions: number;
+  readonly gameParticipations: number;
+  readonly gameResults: number;
+  readonly securityEvents: number;
+}
+
+export interface SessionCleanupPreviewResponse {
+  readonly retentionDays: number;
+  readonly cutoffAt: string;
+  readonly counts: SessionCleanupCounts;
+}
+
+export interface SessionCleanupResponse extends SessionCleanupPreviewResponse {
+  readonly cleanupRunId: string;
+  readonly batchSize: number;
+  readonly remaining: SessionCleanupCounts;
+}
+
 export interface AdminAuditSummary {
   readonly id: string;
   readonly adminUsername: string;
@@ -187,6 +207,8 @@ export interface GameSessionSummary {
   readonly score: number | null;
   readonly reward: string | null;
 }
-export interface StartGameSessionResponse { readonly session: GameSessionSummary; readonly publicState: unknown; readonly replayed: boolean; readonly nextSequence: number }
+export interface StartGameSessionResponse { readonly session: GameSessionSummary; readonly publicState: unknown; readonly replayed: boolean; readonly nextSequence: number; readonly expiresAt?: string | null }
 export interface GameHistoryResponse { readonly sessions: readonly GameSessionSummary[] }
 export interface ActiveGameSessionResponse { readonly active: StartGameSessionResponse | null }
+
+export * from "./neon-mines.js";

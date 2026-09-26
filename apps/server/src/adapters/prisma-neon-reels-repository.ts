@@ -9,9 +9,10 @@ export class PrismaNeonReelsRepository implements NeonReelsRepository {
       return await this.database.$transaction(async (transaction) => {
         const game = await transaction.game.findFirst({ where: { id: input.gameId, slug: "neon-reels", status: "ACTIVE" }, include: { activeVersion: true } });
         if (game?.activeVersion === null || game?.activeVersion === undefined) throw new NeonReelsError("GAME_NOT_AVAILABLE", "Game is not available");
-        const wallet = await transaction.wallet.findUnique({ where: { accountId: input.playerId } });
-        if (wallet === null) throw new NeonReelsError("GAME_NOT_AVAILABLE", "Player wallet not found");
-        await lockWallet(transaction, wallet.id);
+        const walletIdentity = await transaction.wallet.findUnique({ where: { accountId: input.playerId }, select: { id: true } });
+        if (walletIdentity === null) throw new NeonReelsError("GAME_NOT_AVAILABLE", "Player wallet not found");
+        await lockWallet(transaction, walletIdentity.id);
+        const wallet = await transaction.wallet.findUniqueOrThrow({ where: { id: walletIdentity.id } });
 
         const replay = await transaction.gameSession.findUnique({ where: { ownerAccountId_startIdempotencyKey: { ownerAccountId: input.playerId, startIdempotencyKey: input.idempotencyKey } }, include: sessionInclude });
         if (replay !== null) {

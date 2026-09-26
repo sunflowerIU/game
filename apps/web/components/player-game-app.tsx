@@ -1,13 +1,14 @@
 "use client";
 
-import type { ActiveGameSessionResponse, GameCatalogResponse, LoginResponse, MeResponse, StartGameSessionResponse, WalletResponse, WalletSummary, WalletUpdateEvent } from "@game-platform/contracts";
+import type { ActiveGameSessionResponse, GameCatalogResponse, LoginResponse, MeResponse, NeonMinesAction, NeonMinesCommandResponse, NeonMinesDifficulty, NeonMinesPublicState, StartGameSessionResponse, WalletResponse, WalletSummary, WalletUpdateEvent } from "@game-platform/contracts";
 import dynamic from "next/dynamic";
 import { useCallback, useEffect, useRef, useState, type FormEvent } from "react";
-import { ApiClientError, apiRequest, apiUrl } from "../lib/api-client";
+import { ApiClientError, apiRequest, apiUrl, timedApiRequest } from "../lib/api-client";
 import { useGameAudio } from "../lib/game-audio";
 import { coinsToCents, formatCents } from "../lib/money";
 import { useToast } from "./toast-provider";
 import type { NeonReelsCanvasState } from "./neon-reels-canvas";
+import { NeonMinesRound } from "./neon-mines-round";
 
 type View = "boot" | "login" | "lobby" | "play";
 type CatalogGame = GameCatalogResponse["games"][number];
@@ -27,6 +28,10 @@ export function PlayerGameApp() {
   const [active, setActive] = useState<StartGameSessionResponse | null>(null);
   const [dialog, setDialog] = useState<PlayerDialog>(null);
   const [pending, setPending] = useState(false);
+  const [minesNeedsSync, setMinesNeedsSync] = useState(false);
+  const minesInFlight = useRef(false);
+  const startInFlight = useRef(false);
+  const pendingMinesStart = useRef<{ signature: string; key: string } | null>(null);
   const walletAccountId = useRef<string | null>(null);
   const walletVersion = useRef(-1);
 
@@ -41,16 +46,16 @@ export function PlayerGameApp() {
   }, []);
 
   const refreshBalance = useCallback(async () => {
-    const result = await apiRequest<WalletResponse>("/api/v1/wallet");
+    const result = await timedApiRequest<WalletResponse>("/api/v1/wallet");
     applyWallet(result.wallet);
   }, [applyWallet]);
 
   const loadPlayer = useCallback(async () => {
     const [identity, wallet, catalog, activeSession] = await Promise.all([
-      apiRequest<MeResponse>("/api/v1/me"),
-      apiRequest<WalletResponse>("/api/v1/wallet"),
-      apiRequest<GameCatalogResponse>("/api/v1/games"),
-      apiRequest<ActiveGameSessionResponse>("/api/v1/game-sessions/active")
+      timedApiRequest<MeResponse>("/api/v1/me"),
+      timedApiRequest<WalletResponse>("/api/v1/wallet"),
+      timedApiRequest<GameCatalogResponse>("/api/v1/games"),
+      timedApiRequest<ActiveGameSessionResponse>("/api/v1/game-sessions/active")
     ]);
     if (identity.type !== "PLAYER") {
       await apiRequest<void>("/api/v1/auth/logout", { method: "POST" });
@@ -58,9 +63,9 @@ export function PlayerGameApp() {
     }
     setMe(identity); applyWallet(wallet.wallet); setGames(catalog.games);
     if (activeSession.active !== null) {
-      const game = catalog.games.find((candidate) => candidate.id === activeSession.active?.session.gameId) ?? null;
+      const game = catalog.games.find((candidate) => candidate.id === activeSession.active?.session.gameId) ?? fallbackActiveGame(activeSession.active);
       setSelectedGame(game); setActive(activeSession.active); setView("play");
-    } else setView("lobby");
+    } else { setActive(null); setSelectedGame(null); setView("lobby"); }
   }, [applyWallet]);
 
   useEffect(() => {
@@ -119,7 +124,7 @@ export function PlayerGameApp() {
   async function logout() {
     playSound("click");
     setPending(true);
-    try { await apiRequest<void>("/api/v1/auth/logout", { method: "POST" }); walletAccountId.current = null; walletVersion.current = -1; setMe(null); setDialog(null); setView("login"); }
+    try { await apiRequest<void>("/api/v1/auth/logout", { method: "POST" }); walletAccountId.current = null; walletVersion.current = -1; pendingMinesStart.current = null; setActive(null); setSelectedGame(null); setMinesNeedsSync(false); setMe(null); setDialog(null); setView("login"); }
     catch (caught: unknown) { showToast(errorText(caught), "error"); }
     finally { setPending(false); }
   }
@@ -133,26 +138,34 @@ export function PlayerGameApp() {
     if (newPassword !== confirmation) { showToast("New passwords do not match.", "error"); setPending(false); return; }
     try {
       await apiRequest<void>("/api/v1/auth/password", { method: "POST", body: JSON.stringify({ currentPassword, newPassword }) });
-      walletAccountId.current = null; walletVersion.current = -1; setMe(null); setDialog(null); setView("login");
+      walletAccountId.current = null; walletVersion.current = -1; pendingMinesStart.current = null; setActive(null); setSelectedGame(null); setMinesNeedsSync(false); setMe(null); setDialog(null); setView("login");
       showToast("Password changed. Sign in again with your new password.", "success");
     } catch (caught: unknown) { showToast(errorText(caught), "error"); }
     finally { setPending(false); }
   }
 
   async function startRound(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault(); if (selectedGame === null) return; setPending(true);
+    event.preventDefault(); if (selectedGame === null || startInFlight.current) return; startInFlight.current = true; setPending(true);
     const form = new FormData(event.currentTarget);
     try {
       playSound(selectedGame.slug === "neon-reels" ? "spin" : "click");
-      const session = await apiRequest<StartGameSessionResponse>(`/api/v1/games/${selectedGame.id}/sessions`, { method: "POST", headers: { "idempotency-key": crypto.randomUUID() }, body: JSON.stringify({ entryAmount: coinsToCents(form.get("entryAmount")) }) });
+      const request = { entryAmount: coinsToCents(form.get("entryAmount")), ...(selectedGame.slug === "neon-mines" ? { difficulty: String(form.get("difficulty")) as NeonMinesDifficulty } : {}) };
+      const signature = JSON.stringify({ gameId: selectedGame.id, ...request });
+      if (pendingMinesStart.current?.signature !== signature) pendingMinesStart.current = { signature, key: crypto.randomUUID() };
+      const session = await timedApiRequest<StartGameSessionResponse>(`/api/v1/games/${selectedGame.id}/sessions`, { method: "POST", headers: { "idempotency-key": selectedGame.slug === "neon-mines" ? pendingMinesStart.current.key : crypto.randomUUID() }, body: JSON.stringify(request) });
+      pendingMinesStart.current = null; setMinesNeedsSync(false);
       setActive(session); setView("play");
+      await refreshBalance().catch(() => undefined);
       if (selectedGame.slug === "neon-reels") {
-        await Promise.all([refreshBalance(), delay(SPIN_ANIMATION_MILLISECONDS)]);
+        await delay(SPIN_ANIMATION_MILLISECONDS);
         const result = session.publicState as SlotState;
         window.setTimeout(() => playSound(result.outcome === "WIN" ? "win" : "lose"), 1_250);
       }
-    } catch (caught: unknown) { showToast(errorText(caught), "error"); }
-    finally { setPending(false); }
+    } catch (caught: unknown) {
+      if (selectedGame.slug === "neon-mines") await loadPlayer().catch(() => undefined);
+      showToast(errorText(caught), "error");
+    }
+    finally { startInFlight.current = false; setPending(false); }
   }
 
   async function spinSlot(entryAmount: number): Promise<boolean> {
@@ -172,12 +185,46 @@ export function PlayerGameApp() {
   }
 
   function leaveRound() {
+    if (selectedGame?.slug === "neon-mines" && isMinesState(active?.publicState) && active.publicState.status === "ACTIVE") {
+      showToast("Cash out before leaving this round.", "error"); return;
+    }
     if (selectedGame?.slug === "neon-reels") { setActive(null); setSelectedGame(null); }
+    if (selectedGame?.slug === "neon-mines") { setActive(null); setSelectedGame(null); }
     setView("lobby");
   }
 
+  async function playMines(action: NeonMinesAction) {
+    if (minesInFlight.current || minesNeedsSync || selectedGame?.slug !== "neon-mines" || active === null || !isMinesState(active.publicState) || active.publicState.status !== "ACTIVE") return;
+    minesInFlight.current = true; setPending(true); playSound("click");
+    try {
+      const result = await timedApiRequest<NeonMinesCommandResponse>(`/api/v1/game-sessions/${active.session.id}/commands`, {
+        method: "POST", body: JSON.stringify({ commandId: crypto.randomUUID(), sequence: active.nextSequence, payload: action })
+      });
+      setActive(result);
+      if (result.publicState.status !== "ACTIVE") {
+        await refreshBalance().catch(() => undefined);
+        playSound(result.publicState.status === "MINE_HIT" || result.publicState.status === "ABANDONED" ? "lose" : "win");
+      }
+    } catch (caught: unknown) {
+      try {
+        const resumed = await timedApiRequest<ActiveGameSessionResponse>("/api/v1/game-sessions/active");
+        if (resumed.active !== null && resumed.active.session.id === active.session.id) setActive(resumed.active);
+        else { await refreshBalance(); setActive(null); setSelectedGame(null); setView("lobby"); }
+      } catch { setMinesNeedsSync(true); }
+      showToast(errorText(caught), "error");
+    } finally { minesInFlight.current = false; setPending(false); }
+  }
+
+  async function reconnectMines() {
+    if (minesInFlight.current) return;
+    minesInFlight.current = true; setPending(true);
+    try { await loadPlayer(); setMinesNeedsSync(false); await refreshBalance().catch(() => undefined); }
+    catch (caught: unknown) { showToast(errorText(caught), "error"); }
+    finally { minesInFlight.current = false; setPending(false); }
+  }
+
   async function finishRound() {
-    setActive(null);
+    setActive(null); setSelectedGame(null);
     try { await loadPlayer(); showToast("Round complete. Wallet updated.", "success"); }
     catch (caught: unknown) { showToast(errorText(caught), "error"); setView("lobby"); }
   }
@@ -192,8 +239,8 @@ export function PlayerGameApp() {
         <ArcadeTopbar username={me.username} balance={balance} onSettings={() => { playSound("click"); setDialog("settings"); }} />
         <Lobby games={games} onSelect={(game) => { playSound("click"); setSelectedGame(game); }} />
       </>}
-      {view === "play" && active !== null && selectedGame !== null && <RoundScreen active={active} game={selectedGame} balance={balance} pending={pending} onSettings={() => { playSound("click"); setDialog("settings"); }} onExit={leaveRound} onSlotSpin={spinSlot} />}
-      {selectedGame !== null && active === null && view === "lobby" && <EntryPanel game={selectedGame} pending={pending} onClose={() => setSelectedGame(null)} onSubmit={startRound} />}
+      {view === "play" && active !== null && selectedGame !== null && <RoundScreen active={active} game={selectedGame} balance={balance} pending={pending} minesNeedsSync={minesNeedsSync} onMinesReconnect={() => void reconnectMines()} onSettings={() => { playSound("click"); setDialog("settings"); }} onExit={leaveRound} onSlotSpin={spinSlot} onMinesAction={playMines} onMinesDone={() => void finishRound()} />}
+      {selectedGame !== null && active === null && view === "lobby" && <EntryPanel key={selectedGame.id} game={selectedGame} pending={pending} onClose={() => setSelectedGame(null)} onSubmit={startRound} />}
       {dialog !== null && <PlayerSettingsDialog dialog={dialog} pending={pending} muted={muted} onToggleMuted={toggleMuted} onClose={() => setDialog(null)} onChangeDialog={setDialog} onChangePassword={changePassword} onLogout={() => void logout()} />}
       <MobileOnlyGate />
     </section>
@@ -215,7 +262,7 @@ function ArcadeTopbar({ username, balance, onSettings }: Readonly<{ username: st
 }
 
 function Lobby({ games, onSelect }: Readonly<{ games: readonly CatalogGame[]; onSelect: (game: CatalogGame) => void }>) {
-  return <div className="game-content"><section className="hero-banner slot-feature"><div><span className="live-chip">NEW</span><p>FEATURED GAME</p><h2>Neon<br /><em>Reels</em></h2><small>Five reels. Five lines. Instant wins.</small></div><div className="hero-slots"><i>7</i><i>★</i><i>◆</i></div></section><div className="section-title"><div><small>PLAY NOW</small><h3>Choose your game</h3></div><span>{games.length} LIVE</span></div>{games.length === 0 ? <div className="empty-game"><strong>More games loading soon</strong><span>Check back with your operator.</span></div> : <div className="game-grid">{games.map((game, index) => <button className={`game-tile game-tile-${index % 3} ${game.slug === "neon-reels" ? "slot-game-tile" : ""}`} key={`${game.id}-${game.version}`} onClick={() => onSelect(game)}><div className="tile-art"><span>{game.slug === "neon-reels" ? "777" : index % 2 === 0 ? "◎" : "◆"}</span><i>PLAY</i></div><strong>{game.name}</strong><small>{formatCents(game.minimumEntry)}–{game.maximumEntry === "0" ? "∞" : formatCents(game.maximumEntry)} coins</small></button>)}</div>}</div>;
+  return <div className="game-content"><section className="hero-banner slot-feature"><div><span className="live-chip">NEW</span><p>FEATURED GAME</p><h2>Neon<br /><em>Reels</em></h2><small>Five reels. Five lines. Instant wins.</small></div><div className="hero-slots"><i>7</i><i>★</i><i>◆</i></div></section><div className="section-title"><div><small>PLAY NOW</small><h3>Choose your game</h3></div><span>{games.length} LIVE</span></div>{games.length === 0 ? <div className="empty-game"><strong>More games loading soon</strong><span>Check back with your operator.</span></div> : <div className="game-grid">{games.map((game, index) => <button className={`game-tile game-tile-${index % 3} ${game.slug === "neon-reels" ? "slot-game-tile" : game.slug === "neon-mines" ? "mines-game-tile" : ""}`} key={`${game.id}-${game.version}`} onClick={() => onSelect(game)}><div className="tile-art"><span>{game.slug === "neon-reels" ? "777" : game.slug === "neon-mines" ? "✦" : index % 2 === 0 ? "◎" : "◆"}</span><i>PLAY</i></div><strong>{game.name}</strong><small>{formatCents(game.minimumEntry)}–{game.maximumEntry === "0" ? "∞" : formatCents(game.maximumEntry)} coins</small></button>)}</div>}</div>;
 }
 
 function PlayerSettingsDialog({ dialog, pending, muted, onToggleMuted, onClose, onChangeDialog, onChangePassword, onLogout }: Readonly<{ dialog: Exclude<PlayerDialog, null>; pending: boolean; muted: boolean; onToggleMuted: () => void; onClose: () => void; onChangeDialog: (dialog: PlayerDialog) => void; onChangePassword: (event: FormEvent<HTMLFormElement>) => void; onLogout: () => void }>) {
@@ -230,13 +277,17 @@ function MobileOnlyGate() { return <div className="mobile-only-device" role="sta
 
 function EntryPanel({ game, pending, onClose, onSubmit }: Readonly<{ game: CatalogGame; pending: boolean; onClose: () => void; onSubmit: (event: FormEvent<HTMLFormElement>) => void }>) {
   const slot = game.slug === "neon-reels";
+  const mines = game.slug === "neon-mines";
+  const [difficulty, setDifficulty] = useState<NeonMinesDifficulty>("EASY");
   const minimum = formatCents(game.minimumEntry); const maximum = game.maximumEntry === "0" ? undefined : formatCents(game.maximumEntry);
-  const denominations = slot ? wagerOptions(game) : [];
-  return <div className="game-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><form className="entry-panel" onSubmit={onSubmit}><button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button><div className={`entry-icon ${slot ? "slot-entry-icon" : ""}`}>{slot ? "777" : "◎"}</div><p className="arcade-kicker">{slot ? "Five-line slot" : "Ready to play?"}</p><h2>{game.name}</h2><small>{slot ? "Choose your wager for the first spin" : "Choose your entry amount"}</small><label><span>COINS</span>{slot ? <select name="entryAmount" defaultValue={formatCents(denominations[0] ?? 10)}>{denominations.map((amount) => <option key={amount} value={formatCents(amount)}>{formatWager(amount)} coin</option>)}</select> : <input name="entryAmount" type="number" min={minimum} max={maximum} defaultValue={minimum} step="0.01" inputMode="decimal" required />}</label><p className="entry-range">{slot ? "Available: 0.1 · 0.5 · 1 · 5 · 10 · 20 · 50" : `Allowed: ${minimum}–${maximum ?? "unlimited"}`}</p><button className="play-button" disabled={pending}>{pending ? "SPINNING…" : slot ? "PLAY & SPIN" : "START ROUND"}</button></form></div>;
+  const denominations = slot || mines ? wagerOptions(game) : [];
+  const mineWagers = denominations.filter((amount) => amount <= difficultyMaximum(difficulty));
+  return <div className="game-modal-backdrop" onMouseDown={(event) => { if (event.target === event.currentTarget && !pending) onClose(); }}><form className={`entry-panel ${mines ? "mines-entry-panel" : ""}`} onSubmit={onSubmit}><button type="button" className="modal-close" aria-label="Close" onClick={onClose}>×</button><div className={`entry-icon ${slot ? "slot-entry-icon" : mines ? "mines-entry-icon" : ""}`}>{slot ? "777" : mines ? "✦" : "◎"}</div><p className="arcade-kicker">{slot ? "Five-line slot" : mines ? "Find gems. Avoid mines." : "Ready to play?"}</p><h2>{game.name}</h2><small>{mines ? "Choose difficulty and wager" : slot ? "Choose your wager for the first spin" : "Choose your entry amount"}</small>{mines && <><input name="difficulty" type="hidden" value={difficulty} /><div className="difficulty-options" aria-label="Choose difficulty">{(["EASY", "MEDIUM", "HARD", "EXPERT"] as const).map((name) => <button type="button" aria-pressed={difficulty === name} className={difficulty === name ? "selected" : ""} key={name} onClick={() => setDifficulty(name)}><strong>{name}</strong><small>{difficultyMines(name)} MINES</small></button>)}</div></>}<label><span>COINS</span>{slot || mines ? <select name="entryAmount" key={difficulty} defaultValue={formatCents((mines ? mineWagers : denominations)[0] ?? 10)}>{(mines ? mineWagers : denominations).map((amount) => <option key={amount} value={formatCents(amount)}>{formatWager(amount)} coin</option>)}</select> : <input name="entryAmount" type="number" min={minimum} max={maximum} defaultValue={minimum} step="0.01" inputMode="decimal" required />}</label><p className="entry-range">{mines ? `${difficultyMines(difficulty)} mines · Max ${formatWager(difficultyMaximum(difficulty))} coin bet` : slot ? "Available: 0.1 · 0.5 · 1 · 5 · 10 · 20 · 50" : `Allowed: ${minimum}–${maximum ?? "unlimited"}`}</p><button className="play-button" disabled={pending}>{pending ? mines ? "STARTING…" : "SPINNING…" : slot ? "PLAY & SPIN" : "START ROUND"}</button></form></div>;
 }
 
-function RoundScreen({ active, game, balance, pending, onSettings, onExit, onSlotSpin }: Readonly<{ active: StartGameSessionResponse; game: CatalogGame; balance: string; pending: boolean; onSettings: () => void; onExit: () => void; onSlotSpin: (entryAmount: number) => Promise<boolean> }>) {
-  return <div className="round-screen slot-round-screen"><header><button onClick={onExit}>‹</button><div><small>NOW PLAYING</small><strong>{game.name}</strong></div><div className="round-coins"><span>●</span>{formatCents(balance)}</div><span>5 LINES</span><FullscreenButton /><button className="round-settings" aria-label="Open settings" onClick={onSettings}>⚙</button></header><NeonReelsRound state={active.publicState as SlotState} game={game} pending={pending} onSpin={onSlotSpin} /></div>;
+function RoundScreen({ active, game, balance, pending, minesNeedsSync, onMinesReconnect, onSettings, onExit, onSlotSpin, onMinesAction, onMinesDone }: Readonly<{ active: StartGameSessionResponse; game: CatalogGame; balance: string; pending: boolean; minesNeedsSync: boolean; onMinesReconnect: () => void; onSettings: () => void; onExit: () => void; onSlotSpin: (entryAmount: number) => Promise<boolean>; onMinesAction: (action: NeonMinesAction) => Promise<void>; onMinesDone: () => void }>) {
+  const mines = game.slug === "neon-mines" && isMinesState(active.publicState);
+  return <div className={`round-screen ${mines ? "mines-round-screen" : "slot-round-screen"}`}><header><button aria-label="Leave game" onClick={onExit}>‹</button><div><small>NOW PLAYING</small><strong>{game.name}</strong></div><div className="round-coins"><span>●</span>{formatCents(balance)}</div><span>{mines ? `${active.publicState.mineCount} MINES` : "5 LINES"}</span><FullscreenButton /><button className="round-settings" aria-label="Open settings" onClick={onSettings}>⚙</button></header>{mines ? <NeonMinesRound state={active.publicState} expiresAt={active.expiresAt ?? null} pending={pending} needsSync={minesNeedsSync} onReconnect={onMinesReconnect} onAction={onMinesAction} onDone={onMinesDone} /> : <NeonReelsRound state={active.publicState as SlotState} game={game} pending={pending} onSpin={onSlotSpin} />}</div>;
 }
 
 function FullscreenButton() {
@@ -259,7 +310,7 @@ function FullscreenButton() {
       if (document.fullscreenElement !== null) await document.exitFullscreen();
       else {
         await document.documentElement.requestFullscreen();
-        await screen.orientation.lock("landscape").catch(() => undefined);
+        if (document.querySelector(".mines-round-screen") === null) await screen.orientation.lock("landscape").catch(() => undefined);
       }
     } catch {
       // Fullscreen is optional; browsers can deny it without affecting gameplay.
@@ -300,6 +351,13 @@ function NeonReelsRound({ state, game, pending, onSpin }: Readonly<{ state: Slot
 function wagerOptions(game: CatalogGame): readonly number[] {
   const configured = game.configuration.wagerDenominationsCents;
   return Array.isArray(configured) && configured.every((amount) => typeof amount === "number" && Number.isInteger(amount) && amount > 0) ? configured as number[] : [10, 50, 100, 500, 1_000, 2_000, 5_000];
+}
+function difficultyMines(difficulty: NeonMinesDifficulty): number { return ({ EASY: 3, MEDIUM: 5, HARD: 10, EXPERT: 15 } as const)[difficulty]; }
+function difficultyMaximum(difficulty: NeonMinesDifficulty): number { return ({ EASY: 500, MEDIUM: 500, HARD: 200, EXPERT: 100 } as const)[difficulty]; }
+function isMinesState(value: unknown): value is NeonMinesPublicState { return typeof value === "object" && value !== null && (value as { boardTiles?: unknown }).boardTiles === 25 && Array.isArray((value as { selectedTiles?: unknown }).selectedTiles); }
+function fallbackActiveGame(active: NonNullable<ActiveGameSessionResponse["active"]>): CatalogGame | null {
+  if (!isMinesState(active.publicState)) return null;
+  return { id: active.session.gameId, slug: "neon-mines", name: "Neon Mines", status: "ACTIVE", gameType: "SINGLE_PLAYER", version: active.session.gameVersion, minimumEntry: active.session.entryAmount, maximumEntry: active.session.entryAmount, configuration: {} };
 }
 function formatWager(cents: number): string { const formatted = formatCents(cents); return formatted.endsWith(".00") ? formatted.slice(0, -3) : formatted.endsWith("0") ? formatted.slice(0, -1) : formatted; }
 function delay(milliseconds: number): Promise<void> { return new Promise((resolve) => window.setTimeout(resolve, milliseconds)); }

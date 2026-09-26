@@ -67,6 +67,7 @@ services:
       - ./packages/game-core/src:/workspace/packages/game-core/src
       - ./packages/wallet/src:/workspace/packages/wallet/src
       - ./games/neon-reels/src:/workspace/games/neon-reels/src
+      - ./games/neon-mines/src:/workspace/games/neon-mines/src
     depends_on:
       postgres:
         condition: service_healthy

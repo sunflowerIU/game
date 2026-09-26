@@ -16,6 +16,7 @@ COPY packages/database/prisma/schema.prisma packages/database/prisma/schema.pris
 COPY packages/game-core/package.json packages/game-core/package.json
 COPY packages/wallet/package.json packages/wallet/package.json
 COPY games/neon-reels/package.json games/neon-reels/package.json
+COPY games/neon-mines/package.json games/neon-mines/package.json
 RUN pnpm install --frozen-lockfile
 
 FROM dependencies AS build
@@ -39,8 +40,10 @@ CMD ["node", "dist/index.js"]
 
 FROM base AS migrate
 COPY --from=dependencies /workspace/node_modules ./node_modules
+COPY --from=dependencies /workspace/apps ./apps
+COPY --from=dependencies /workspace/games ./games
 COPY --from=build /workspace/packages ./packages
-COPY --from=build /workspace/package.json /workspace/pnpm-workspace.yaml /workspace/tsconfig.base.json ./
+COPY --from=build /workspace/package.json /workspace/pnpm-lock.yaml /workspace/pnpm-workspace.yaml /workspace/tsconfig.base.json ./
 CMD ["pnpm", "db:deploy"]
 
 FROM node:24-alpine AS web

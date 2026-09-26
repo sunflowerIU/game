@@ -124,7 +124,11 @@ Run the paid gameplay profile only against a staging environment or a deliberate
 k6 run -e ORIGIN=https://STAGING_DOMAIN -e PLAYER_USERNAME_PREFIX=load-player- -e PLAYER_PASSWORD='LOAD_TEST_PASSWORD' -e CONCURRENT_PLAYERS=25 infrastructure/load/k6-gameplay.js
 ```
 
-Create and fund one disposable staging account per virtual user (`load-player-1`, `load-player-2`, and so on) so the test measures concurrent customers instead of intentionally contending on one wallet lock. The profile exercises the same login, game catalog, Neon Reels settlement, and wallet-refresh path as the player application. Increase `CONCURRENT_PLAYERS` gradually and require spin p95 below 500 ms, spin p99 below 1 second, fewer than 1% failed requests, and no wallet or ledger invariant failures before raising production capacity.
+Create and fund one disposable staging account per virtual user (`load-player-1`, `load-player-2`, and so on) so the test measures concurrent customers instead of intentionally contending on one wallet lock. The profile defaults to Neon Reels. For Neon Mines on staging, enable it there only and add `-e GAME_SLUG=neon-mines -e MINES_DIFFICULTY=EASY`. The profile starts a real round, selects one tile, cashes out a safe result, and refreshes the wallet. A mine result is an expected successful settlement. Increase `CONCURRENT_PLAYERS` gradually and require start/action p95 below 500 ms, p99 below 1 second, fewer than 1% failed requests, and no wallet or ledger invariant failures before raising production capacity. Run each Mines difficulty separately and confirm result and ledger uniqueness after every run.
+
+For the complete 10/25/50-player Mines matrix, resource capture, rate-limit-safe
+authentication ramp and mandatory settlement audit, follow
+[`docs/neon-mines-staging-load-runbook.md`](neon-mines-staging-load-runbook.md).
 
 ## What could go wrong, and how it is prevented
 

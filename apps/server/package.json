@@ -23,6 +23,7 @@
     "@game-platform/database": "workspace:*",
     "@game-platform/game-core": "workspace:*",
     "@game-platform/neon-reels": "workspace:*",
+    "@game-platform/neon-mines": "workspace:*",
     "@game-platform/wallet": "workspace:*",
     "argon2": "0.45.1",
     "dotenv": "17.4.2",

@@ -3,6 +3,10 @@ import { after, test } from "node:test";
 
 import { buildApp } from "./app.js";
 import { WalletEventBroker } from "./wallet-events.js";
+import { NeonMinesEngine } from "@game-platform/neon-mines";
+import { NeonMinesError } from "./adapters/prisma-neon-mines-repository.js";
+import type { NeonMinesCommandRequest } from "@game-platform/contracts";
+import type { ServerConfig } from "./config.js";
 
 const authenticatedPrincipal = {
   accountId: "fa05dfb8-e4e3-49f6-bd92-50d086b28294",
@@ -47,10 +51,13 @@ const admin = {
   previewPlayerRecordCleanup: async (_principal: unknown, input: { playerId: string; retentionDays: number }) => ({ playerId: input.playerId, username: "DeleteMe", retentionDays: input.retentionDays, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), counts: cleanupCounts }),
   deletePlayerRecords: async (_principal: unknown, input: { playerId: string; retentionDays: number }) => ({ cleanupRunId: "3528064d-6749-4270-be00-57a31d2cbbda", playerId: input.playerId, username: "DeleteMe", retentionDays: input.retentionDays, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), counts: cleanupCounts }),
   previewInactivePlayerCleanup: async (_principal: unknown, input: { inactivityDays: number; includePositiveBalances: boolean }) => ({ ...input, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), inactivePlayers: 8, activeSessionPlayers: 1, positiveBalancePlayers: 2, positiveBalanceTotal: 75n, deletablePlayers: input.includePositiveBalances ? 7 : 5 }),
-  deleteInactivePlayerBatch: async (_principal: unknown, input: { inactivityDays: number; includePositiveBalances: boolean; batchSize: number }) => ({ cleanupRunId: "7a226aab-239e-48f7-8e75-e50cf890c25d", ...input, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), deletedPlayers: 5, deletedBalance: 0n, deletedRecords: cleanupCounts, remainingPlayers: 0 })
+  deleteInactivePlayerBatch: async (_principal: unknown, input: { inactivityDays: number; includePositiveBalances: boolean; batchSize: number }) => ({ cleanupRunId: "7a226aab-239e-48f7-8e75-e50cf890c25d", ...input, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), deletedPlayers: 5, deletedBalance: 0n, deletedRecords: cleanupCounts, remainingPlayers: 0 }),
+  previewSessionCleanup: async (_principal: unknown, input: { retentionDays: number }) => ({ ...input, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), counts: sessionCleanupCounts }),
+  deleteSessionBatch: async (_principal: unknown, input: { retentionDays: number; batchSize: number }) => ({ cleanupRunId: "3ea70922-a400-4878-a355-7022bc06f32d", ...input, cutoffAt: new Date("2026-07-26T10:00:00.000Z"), counts: sessionCleanupCounts, remaining: { ...sessionCleanupCounts, authSessions: 0, gameSessions: 0 } })
 };
 
 const cleanupCounts = { authSessions: 1, loginEvents: 2, securityEvents: 3, ownedGameSessions: 4, gameParticipations: 4, gameResults: 4, ledgerEntries: 5, adminAuditLogs: 6 };
+const sessionCleanupCounts = { authSessions: 5, gameSessions: 4, gameParticipations: 4, gameResults: 4, securityEvents: 3 };
 
 let receivedIdempotencyKey: string | null = null;
 const walletRecord = { accountId: "5fdb5ce8-a3c9-41f7-bd25-4072f67123e1", balance: 10n, version: 1, updatedAt: new Date("2026-08-25T10:00:00.000Z") };
@@ -64,7 +71,15 @@ const wallet = {
 const gameCatalog = { listGames: async () => [] };
 const receivedGameStarts: { entryAmount: bigint; idempotencyKey: string }[] = [];
 const gameSession = { id: "2c84e3d5-4ba7-49ec-9c57-70ea25f30131", gameId: "d9ab8c9e-c72f-4c87-b6eb-e61267269b61", gameVersion: "1.0.0", status: "COMPLETED" as const, entryAmount: 10n, startedAt: new Date("2026-08-25T10:00:00.000Z"), completedAt: new Date("2026-08-25T10:00:00.000Z"), score: 0, reward: 0n };
-const gameSessions = { start: async (_principal: unknown, input: { entryAmount: bigint; idempotencyKey: string }) => { receivedGameStarts.push(input); return { session: gameSession, publicState: { status: "COMPLETED" }, replayed: false, nextSequence: 1 }; }, history: async () => [], resume: async () => null };
+const receivedMinesCommands: NeonMinesCommandRequest[] = [];
+const gameSessions = {
+  start: async (_principal: unknown, input: { entryAmount: bigint; idempotencyKey: string }) => { receivedGameStarts.push(input); return { session: gameSession, publicState: { status: "COMPLETED" }, replayed: false, nextSequence: 1 }; }, history: async () => [], resume: async () => null,
+  command: async (_principal: unknown, _sessionId: string, input: NeonMinesCommandRequest) => {
+    if (input.sequence !== 1) throw new NeonMinesError("REPLAYED_SEQUENCE", "Unexpected sequence");
+    receivedMinesCommands.push(input);
+    return { session: gameSession, publicState: new NeonMinesEngine(100n, "EASY").getPublicState(), replayed: false, nextSequence: 2, acceptedSequence: 1, expiresAt: "2026-09-03T12:00:00.000Z" };
+  }
+};
 const platformAdmin = {
   listGames: async () => [], listGameSessions: async () => [], listSecurityEvents: async () => [],
   getPlayerDetail: async () => { throw new Error("not used"); }, setGameStatus: async () => { throw new Error("not used"); }, updateConfiguration: async () => { throw new Error("not used"); }
@@ -73,7 +88,7 @@ const walletEvents = new WalletEventBroker();
 let publishedWalletBalance: string | null = null;
 walletEvents.subscribe(walletRecord.accountId, (event) => { publishedWalletBalance = event.wallet.balance; });
 
-const app = buildApp({
+const serverConfig: ServerConfig = {
   databaseUrl: "postgresql://unused",
   host: "127.0.0.1",
   logLevel: "silent",
@@ -81,7 +96,8 @@ const app = buildApp({
   port: 4_000,
   trustProxy: false,
   webOrigin: "http://localhost:3000"
-}, {
+};
+const applicationDependencies = {
   admin,
   platformAdmin,
   auth,
@@ -90,9 +106,38 @@ const app = buildApp({
   gameSessions,
   walletEvents,
   readinessCheck: async () => undefined
-});
+};
+const app = buildApp(serverConfig, applicationDependencies);
 
 after(async () => app.close());
+
+test("Mines HTTP command contract authenticates, validates without coercion, and maps conflicts", async () => {
+  const path = `/api/v1/game-sessions/${gameSession.id}/commands`;
+  const headers = { cookie: `gp_session=${"B".repeat(43)}` };
+  const payload = { commandId: "f37c3630-9256-48b6-a21d-02a52ced952d", sequence: 1, payload: { action: "SELECT_TILE", tile: 3 } };
+  assert.equal((await app.inject({ method: "POST", url: path, payload })).statusCode, 401);
+  for (const body of [{ ...payload, sequence: "1" }, { ...payload, mineTiles: [0] }, { ...payload, payload: { action: "CASH_OUT", reward: 999 } }]) {
+    assert.equal((await app.inject({ method: "POST", url: path, headers, payload: body })).statusCode, 400);
+  }
+  const accepted = await app.inject({ method: "POST", url: path, headers, payload });
+  assert.equal(accepted.statusCode, 200);
+  assert.equal(accepted.json().acceptedSequence, 1);
+  assert.deepEqual(accepted.json().publicState.revealedMines, []);
+  assert.equal(receivedMinesCommands.length, 1);
+  assert.equal((await app.inject({ method: "POST", url: path, headers, payload: { ...payload, sequence: 2 } })).statusCode, 409);
+});
+
+test("Mines start rejects tampering and preserves typed difficulty", async () => {
+  const url = `/api/v1/games/${gameSession.gameId}/sessions`;
+  const headers = { cookie: `gp_session=${"B".repeat(43)}`, "idempotency-key": "mines-start-00000001" };
+  const payload = { entryAmount: 100, difficulty: "HARD" };
+  for (const body of [{ ...payload, entryAmount: "100" }, { ...payload, difficulty: "unknown" }, { ...payload, mineTiles: [] }]) {
+    assert.equal((await app.inject({ method: "POST", url, headers, payload: body })).statusCode, 400);
+  }
+  const response = await app.inject({ method: "POST", url, headers, payload });
+  assert.equal(response.statusCode, 200);
+  assert.equal((receivedGameStarts.at(-1) as { difficulty?: string }).difficulty, "HARD");
+});
 
 test("liveness endpoint returns only public health data", async () => {
   const response = await app.inject({ method: "GET", url: "/health/live" });
@@ -100,6 +145,15 @@ test("liveness endpoint returns only public health data", async () => {
   assert.equal(response.statusCode, 200);
   assert.deepEqual(Object.keys(response.json()).sort(), ["service", "status", "timestamp"]);
   assert.equal(response.json().status, "ok");
+});
+
+test("readiness returns 503 when a required dependency is unavailable", async () => {
+  const unavailable = buildApp(serverConfig, { ...applicationDependencies, readinessCheck: async () => { throw new Error("missing schema"); } });
+  const response = await unavailable.inject({ method: "GET", url: "/health/ready" });
+  assert.equal(response.statusCode, 503);
+  assert.equal(response.json().error.code, "NOT_READY");
+  assert.doesNotMatch(response.body, /missing schema/u);
+  await unavailable.close();
 });
 
 test("platform endpoint exposes the versioned browser contract", async () => {
@@ -271,6 +325,19 @@ test("inactive-player cleanup previews exclusions and executes only bounded idem
   assert.equal(deleted.statusCode, 200);
   assert.equal(deleted.json().deletedPlayers, 5);
   assert.equal(deleted.json().remainingPlayers, 0);
+});
+
+test("session cleanup previews and deletes only bounded retention batches", async () => {
+  const preview = await app.inject({ method: "POST", url: "/api/v1/admin/sessions/deletion-preview", headers: { cookie: `gp_session=${"C".repeat(43)}` }, payload: { retentionDays: 90 } });
+  assert.equal(preview.statusCode, 200);
+  assert.equal(preview.json().counts.authSessions, 5);
+  assert.equal(preview.json().counts.gameSessions, 4);
+  const invalid = await app.inject({ method: "POST", url: "/api/v1/admin/sessions/delete", headers: { cookie: `gp_session=${"C".repeat(43)}`, "idempotency-key": "session-cleanup-test-01" }, payload: { retentionDays: 90, batchSize: 1001, reason: "Remove old sessions" } });
+  assert.equal(invalid.statusCode, 400);
+  const deleted = await app.inject({ method: "POST", url: "/api/v1/admin/sessions/delete", headers: { cookie: `gp_session=${"C".repeat(43)}`, "idempotency-key": "session-cleanup-test-02" }, payload: { retentionDays: 90, batchSize: 500, reason: "Remove old sessions" } });
+  assert.equal(deleted.statusCode, 200);
+  assert.equal(deleted.json().batchSize, 500);
+  assert.equal(deleted.json().counts.gameSessions, 4);
 });
 
 test("wallet adjustments require and forward an idempotency key", async () => {

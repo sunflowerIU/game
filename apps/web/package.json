@@ -8,7 +8,7 @@
     "start": "next start",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "node --test"
+    "test": "tsx --tsconfig test/tsconfig.json --test test/*.test.tsx"
   },
   "dependencies": {
     "@game-platform/contracts": "workspace:*",
@@ -24,6 +24,7 @@
     "eslint": "9.39.5",
     "eslint-config-next": "16.3.2",
     "tailwindcss": "4.3.3",
+    "tsx": "4.23.12",
     "typescript": "6.0.3"
   }
 }

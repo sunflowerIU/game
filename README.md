@@ -60,12 +60,40 @@ Game versioning and the authoritative protocol boundary are documented in
 [`docs/game-platform-foundation.md`](docs/game-platform-foundation.md).
 Neon Reels rules, payouts, and atomic spin settlement are documented in
 [`docs/neon-reels.md`](docs/neon-reels.md).
+Neon Mines launch mathematics, wager ceilings, payout caps, and business-risk assumptions are documented in
+[`docs/neon-mines-business-model.md`](docs/neon-mines-business-model.md).
+Its in-memory engine lifecycle, action validation, hidden-state boundary, and snapshot contract are documented in
+[`docs/neon-mines-engine.md`](docs/neon-mines-engine.md).
+Its HTTP backend, transactional settlement, and bounded private-state storage are documented in
+[`docs/neon-mines-persistence-api.md`](docs/neon-mines-persistence-api.md).
+Neon Mines player flow, recovery behavior, and Section 5 verification are in
+[`docs/neon-mines-player-ui.md`](docs/neon-mines-player-ui.md).
+Neon Mines administrative limits and availability controls are in
+[`docs/neon-mines-admin-controls.md`](docs/neon-mines-admin-controls.md).
+Neon Mines fairness/security findings and remaining launch checks are in
+[`docs/neon-mines-security-review.md`](docs/neon-mines-security-review.md).
+Neon Mines Section 8 launch status and the remaining production gates are in
+[`docs/neon-mines-production-readiness.md`](docs/neon-mines-production-readiness.md).
+The backed-up local migration and real API journey are recorded in
+[`docs/neon-mines-local-integration.md`](docs/neon-mines-local-integration.md).
 Administrator game controls and inspection guarantees are documented in
 [`docs/admin-operations.md`](docs/admin-operations.md).
 Manual player deletion, retention cleanup, safeguards, and recovery guidance are documented in
 [`docs/data-cleanup.md`](docs/data-cleanup.md).
 Production deployment, backup, monitoring, and recovery procedures are in
 [`docs/production-operations.md`](docs/production-operations.md).
+The live local browser and responsive viewport evidence for Neon Mines is in
+[`docs/neon-mines-browser-verification.md`](docs/neon-mines-browser-verification.md).
+LAN setup, diagnostics, and physical-phone checks are in
+[`docs/phone-testing.md`](docs/phone-testing.md).
+The short 10-player local load measurements, settlement audit, and remaining VPS
+capacity gates are in
+[`docs/neon-mines-local-load-validation.md`](docs/neon-mines-local-load-validation.md).
+The monitored 10/25/50-player staging procedure and settlement gate are in
+[`docs/neon-mines-staging-load-runbook.md`](docs/neon-mines-staging-load-runbook.md).
+The final local typecheck, test, transactional database and production-build gate
+is recorded in
+[`docs/neon-mines-local-release-gate.md`](docs/neon-mines-local-release-gate.md).
 
 The browser routes are:
 

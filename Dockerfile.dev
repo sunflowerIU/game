@@ -17,6 +17,7 @@ COPY packages/database/prisma/schema.prisma ./packages/database/prisma/schema.pr
 COPY packages/game-core/package.json ./packages/game-core/package.json
 COPY packages/wallet/package.json ./packages/wallet/package.json
 COPY games/neon-reels/package.json ./games/neon-reels/package.json
+COPY games/neon-mines/package.json ./games/neon-mines/package.json
 
 RUN pnpm install --frozen-lockfile
 

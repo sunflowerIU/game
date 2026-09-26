@@ -95,6 +95,26 @@ export interface InactivePlayerCleanupResult {
   readonly remainingPlayers: number;
 }
 
+export interface SessionCleanupCounts {
+  readonly authSessions: number;
+  readonly gameSessions: number;
+  readonly gameParticipations: number;
+  readonly gameResults: number;
+  readonly securityEvents: number;
+}
+
+export interface SessionCleanupPreview {
+  readonly retentionDays: number;
+  readonly cutoffAt: Date;
+  readonly counts: SessionCleanupCounts;
+}
+
+export interface SessionCleanupResult extends SessionCleanupPreview {
+  readonly cleanupRunId: string;
+  readonly batchSize: number;
+  readonly remaining: SessionCleanupCounts;
+}
+
 export interface PlayerAdminRepository {
   listPlayers(limit: number): Promise<readonly PlayerRecord[]>;
   listAuditLogs(limit: number): Promise<readonly AdminAuditRecord[]>;
@@ -148,6 +168,14 @@ export interface PlayerAdminRepository {
     readonly idempotencyKey: string;
     readonly audit: AuditContext;
   }): Promise<InactivePlayerCleanupResult>;
+  getSessionCleanupPreview(input: { readonly retentionDays: number; readonly cutoffAt: Date }): Promise<SessionCleanupPreview>;
+  deleteSessionBatch(input: {
+    readonly retentionDays: number;
+    readonly cutoffAt: Date;
+    readonly batchSize: number;
+    readonly idempotencyKey: string;
+    readonly audit: AuditContext;
+  }): Promise<SessionCleanupResult>;
 }
 
 export class PlayerAdminError extends Error {
@@ -337,6 +365,45 @@ export class PlayerAdminService {
       inactivityDays: input.inactivityDays,
       cutoffAt: retentionCutoff(audit.occurredAt, input.inactivityDays),
       includePositiveBalances: input.includePositiveBalances,
+      batchSize: input.batchSize,
+      idempotencyKey: input.idempotencyKey,
+      audit
+    });
+  }
+
+  public async previewSessionCleanup(
+    principal: AuthorizedPrincipal,
+    input: { readonly retentionDays: number }
+  ): Promise<SessionCleanupPreview> {
+    requirePermission(principal, "DATA_RETENTION_MANAGE");
+    validateRetentionDays(input.retentionDays);
+    return this.repository.getSessionCleanupPreview({
+      retentionDays: input.retentionDays,
+      cutoffAt: retentionCutoff(this.clock.now(), input.retentionDays)
+    });
+  }
+
+  public async deleteSessionBatch(
+    principal: AuthorizedPrincipal,
+    input: {
+      readonly retentionDays: number;
+      readonly batchSize: number;
+      readonly idempotencyKey: string;
+      readonly reason: string;
+      readonly ipAddress: string;
+      readonly userAgent: string | null;
+    }
+  ): Promise<SessionCleanupResult> {
+    requirePermission(principal, "DATA_RETENTION_MANAGE");
+    validateRetentionDays(input.retentionDays);
+    if (!Number.isInteger(input.batchSize) || input.batchSize < 1 || input.batchSize > 1000) {
+      throw new PlayerAdminError("INVALID_REQUEST", "Session batch size must be a whole number between 1 and 1000");
+    }
+    validateIdempotencyKey(input.idempotencyKey);
+    const audit = this.auditContext(principal, input);
+    return this.repository.deleteSessionBatch({
+      retentionDays: input.retentionDays,
+      cutoffAt: retentionCutoff(audit.occurredAt, input.retentionDays),
       batchSize: input.batchSize,
       idempotencyKey: input.idempotencyKey,
       audit

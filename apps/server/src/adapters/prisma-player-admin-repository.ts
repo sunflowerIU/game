@@ -1,4 +1,4 @@
-import { PlayerAdminError, type AdminAuditRecord, type AuditContext, type InactivePlayerCleanupPreview, type InactivePlayerCleanupResult, type PlayerAdminRepository, type PlayerDeletionCounts, type PlayerDeletionPreview, type PlayerDeletionResult, type PlayerRecord, type PlayerRecordCleanupPreview, type PlayerRecordCleanupResult, type PlayerStatus } from "@game-platform/admin";
+import { PlayerAdminError, type AdminAuditRecord, type AuditContext, type InactivePlayerCleanupPreview, type InactivePlayerCleanupResult, type PlayerAdminRepository, type PlayerDeletionCounts, type PlayerDeletionPreview, type PlayerDeletionResult, type PlayerRecord, type PlayerRecordCleanupPreview, type PlayerRecordCleanupResult, type PlayerStatus, type SessionCleanupCounts, type SessionCleanupPreview, type SessionCleanupResult } from "@game-platform/admin";
 import { Prisma, type DatabaseClient } from "@game-platform/database";
 
 export class PrismaPlayerAdminRepository implements PlayerAdminRepository {
@@ -511,6 +511,83 @@ export class PrismaPlayerAdminRepository implements PlayerAdminRepository {
     }
   }
 
+  public async getSessionCleanupPreview(input: { readonly retentionDays: number; readonly cutoffAt: Date }): Promise<SessionCleanupPreview> {
+    return { ...input, counts: await this.sessionCleanupCounts(this.database, input.cutoffAt) };
+  }
+
+  public async deleteSessionBatch(input: {
+    readonly retentionDays: number;
+    readonly cutoffAt: Date;
+    readonly batchSize: number;
+    readonly idempotencyKey: string;
+    readonly audit: AuditContext;
+  }): Promise<SessionCleanupResult> {
+    try {
+      return await this.serializableCleanup(async (transaction) => {
+        const previousRun = await transaction.dataCleanupRun.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+        if (previousRun !== null) return sessionCleanupReplay(previousRun, input);
+
+        const authRows = await transaction.$queryRaw<readonly { id: string }[]>`
+          SELECT "id" FROM "AuthSession"
+          WHERE "expiresAt" <= ${input.cutoffAt}
+             OR ("revokedAt" IS NOT NULL AND "revokedAt" <= ${input.cutoffAt})
+          ORDER BY COALESCE("revokedAt", "expiresAt"), "id"
+          LIMIT ${input.batchSize}
+          FOR UPDATE SKIP LOCKED
+        `;
+        const gameRows = await transaction.$queryRaw<readonly { id: string }[]>`
+          SELECT "id" FROM "GameSession"
+          WHERE "status" IN ('COMPLETED', 'ABANDONED', 'FAILED')
+            AND "completedAt" <= ${input.cutoffAt}
+          ORDER BY "completedAt", "id"
+          LIMIT ${input.batchSize}
+          FOR UPDATE SKIP LOCKED
+        `;
+        const authIds = authRows.map((row) => row.id);
+        const gameIds = gameRows.map((row) => row.id);
+        const gameFilter = { in: gameIds };
+        const [gameParticipations, gameResults, securityEvents] = await Promise.all([
+          transaction.gameSessionParticipant.count({ where: { gameSessionId: gameFilter } }),
+          transaction.gameResult.count({ where: { gameSessionId: gameFilter } }),
+          transaction.securityEvent.count({ where: { gameSessionId: gameFilter } })
+        ]);
+        const counts: SessionCleanupCounts = {
+          authSessions: authIds.length,
+          gameSessions: gameIds.length,
+          gameParticipations,
+          gameResults,
+          securityEvents
+        };
+        const cleanupRun = await transaction.dataCleanupRun.create({ data: {
+          idempotencyKey: input.idempotencyKey,
+          adminId: input.audit.adminId,
+          action: "SESSION_RECORDS_DELETED",
+          cutoffAt: input.cutoffAt,
+          recordCounts: { ...counts, retentionDays: input.retentionDays, batchSize: input.batchSize, remaining: { ...emptySessionCleanupCounts() } },
+          reason: input.audit.reason,
+          ipAddress: input.audit.ipAddress,
+          userAgent: input.audit.userAgent,
+          createdAt: input.audit.occurredAt
+        } });
+        await transaction.$queryRaw`SELECT set_config('app.cleanup_run_id', ${cleanupRun.id}, true)`;
+        await transaction.authSession.deleteMany({ where: { id: { in: authIds } } });
+        await transaction.securityEvent.deleteMany({ where: { gameSessionId: gameFilter } });
+        await transaction.gameResult.deleteMany({ where: { gameSessionId: gameFilter } });
+        await transaction.gameSessionParticipant.deleteMany({ where: { gameSessionId: gameFilter } });
+        await transaction.gameSession.deleteMany({ where: { id: gameFilter } });
+
+        const remaining = await this.sessionCleanupCounts(transaction, input.cutoffAt);
+        await transaction.dataCleanupRun.update({ where: { id: cleanupRun.id }, data: { recordCounts: { ...counts, retentionDays: input.retentionDays, batchSize: input.batchSize, remaining: { ...remaining } } } });
+        return { cleanupRunId: cleanupRun.id, retentionDays: input.retentionDays, cutoffAt: input.cutoffAt, batchSize: input.batchSize, counts, remaining };
+      });
+    } catch (error: unknown) {
+      if (!isPrismaUniqueConflict(error)) throw error;
+      const previousRun = await this.database.dataCleanupRun.findUnique({ where: { idempotencyKey: input.idempotencyKey } });
+      if (previousRun === null) throw error;
+      return sessionCleanupReplay(previousRun, input);
+    }
+  }
+
   private async buildDeletionPreview(
     database: DeletionQueryClient,
     player: DeletionPlayer
@@ -646,6 +723,30 @@ export class PrismaPlayerAdminRepository implements PlayerAdminRepository {
     };
   }
 
+  private async sessionCleanupCounts(database: RawQueryClient, cutoffAt: Date): Promise<SessionCleanupCounts> {
+    const rows = await database.$queryRaw<readonly SessionCleanupCountRow[]>`
+      WITH old_games AS (
+        SELECT "id" FROM "GameSession"
+        WHERE "status" IN ('COMPLETED', 'ABANDONED', 'FAILED') AND "completedAt" <= ${cutoffAt}
+      )
+      SELECT
+        (SELECT COUNT(*) FROM "AuthSession" WHERE "expiresAt" <= ${cutoffAt} OR ("revokedAt" IS NOT NULL AND "revokedAt" <= ${cutoffAt})) AS "authSessions",
+        (SELECT COUNT(*) FROM old_games) AS "gameSessions",
+        (SELECT COUNT(*) FROM "GameSessionParticipant" WHERE "gameSessionId" IN (SELECT "id" FROM old_games)) AS "gameParticipations",
+        (SELECT COUNT(*) FROM "GameResult" WHERE "gameSessionId" IN (SELECT "id" FROM old_games)) AS "gameResults",
+        (SELECT COUNT(*) FROM "SecurityEvent" WHERE "gameSessionId" IN (SELECT "id" FROM old_games)) AS "securityEvents"
+    `;
+    const row = rows[0];
+    if (row === undefined) throw new Error("Session cleanup preview did not return counts");
+    return {
+      authSessions: Number(row.authSessions),
+      gameSessions: Number(row.gameSessions),
+      gameParticipations: Number(row.gameParticipations),
+      gameResults: Number(row.gameResults),
+      securityEvents: Number(row.securityEvents)
+    };
+  }
+
   private async buildBulkDeletionCounts(database: DeletionQueryClient, playerIds: string[], usernames: string[], walletIds: string[], ownedSessionIds: string[]): Promise<PlayerDeletionCounts> {
     const sessionFilter = { in: ownedSessionIds };
     const [authSessions, loginEvents, securityEvents, gameParticipations, gameResults, ledgerEntries, adminAuditLogs] = await Promise.all([
@@ -698,6 +799,14 @@ interface InactiveCleanupStatsRow {
   readonly positiveBalancePlayers: bigint;
   readonly positiveBalanceTotal: unknown;
   readonly deletablePlayers: bigint;
+}
+
+interface SessionCleanupCountRow {
+  readonly authSessions: bigint;
+  readonly gameSessions: bigint;
+  readonly gameParticipations: bigint;
+  readonly gameResults: bigint;
+  readonly securityEvents: bigint;
 }
 
 function auditData(audit: AuditContext) {
@@ -854,4 +963,36 @@ function inactiveCleanupRunResult(run: { id: string; cutoffAt: Date | null; reco
     deletedRecords: cleanupCounts(values),
     remainingPlayers: integer("remainingPlayers")
   };
+}
+
+function emptySessionCleanupCounts(): SessionCleanupCounts {
+  return { authSessions: 0, gameSessions: 0, gameParticipations: 0, gameResults: 0, securityEvents: 0 };
+}
+
+function sessionCleanupReplay(
+  run: { id: string; action: string; adminId: string; cutoffAt: Date | null; recordCounts: unknown },
+  input: { readonly retentionDays: number; readonly batchSize: number; readonly audit: AuditContext }
+): SessionCleanupResult {
+  if (run.action !== "SESSION_RECORDS_DELETED" || run.adminId !== input.audit.adminId) throw new PlayerAdminError("CONFLICT", "Cleanup idempotency key was already used for another operation");
+  if (run.cutoffAt === null || typeof run.recordCounts !== "object" || run.recordCounts === null || Array.isArray(run.recordCounts)) throw new Error("Stored session cleanup run is incomplete");
+  const values = run.recordCounts as Record<string, unknown>;
+  const integer = (source: Record<string, unknown>, key: string): number => {
+    const value = source[key];
+    if (typeof value !== "number" || !Number.isSafeInteger(value) || value < 0) throw new Error(`Stored session cleanup value ${key} is invalid`);
+    return value;
+  };
+  const retentionDays = integer(values, "retentionDays");
+  const batchSize = integer(values, "batchSize");
+  if (retentionDays !== input.retentionDays || batchSize !== input.batchSize) throw new PlayerAdminError("CONFLICT", "Cleanup idempotency key was already used with different session parameters");
+  const remainingValue = values.remaining;
+  if (typeof remainingValue !== "object" || remainingValue === null || Array.isArray(remainingValue)) throw new Error("Stored remaining session counts are invalid");
+  const remainingValues = remainingValue as Record<string, unknown>;
+  const counts = (source: Record<string, unknown>): SessionCleanupCounts => ({
+    authSessions: integer(source, "authSessions"),
+    gameSessions: integer(source, "gameSessions"),
+    gameParticipations: integer(source, "gameParticipations"),
+    gameResults: integer(source, "gameResults"),
+    securityEvents: integer(source, "securityEvents")
+  });
+  return { cleanupRunId: run.id, retentionDays, cutoffAt: run.cutoffAt, batchSize, counts: counts(values), remaining: counts(remainingValues) };
 }
