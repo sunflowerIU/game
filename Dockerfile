@@ -31,9 +31,25 @@ RUN pnpm build
 
 FROM node:24-alpine AS server
 ENV NODE_ENV=production
-WORKDIR /app
-COPY --from=dependencies --chown=node:node /workspace/node_modules ./node_modules
-COPY --from=build --chown=node:node /workspace/apps/server/dist ./dist
+WORKDIR /workspace
+
+COPY --from=dependencies --chown=node:node \
+  /workspace/node_modules \
+  ./node_modules
+
+COPY --from=dependencies --chown=node:node \
+  /workspace/apps/server/package.json \
+  ./apps/server/package.json
+
+COPY --from=dependencies --chown=node:node \
+  /workspace/apps/server/node_modules \
+  ./apps/server/node_modules
+
+COPY --from=build --chown=node:node \
+  /workspace/apps/server/dist \
+  ./apps/server/dist
+
+WORKDIR /workspace/apps/server
 USER node
 EXPOSE 4000
 CMD ["node", "dist/index.js"]

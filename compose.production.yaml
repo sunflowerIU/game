@@ -12,6 +12,41 @@ x-service-defaults: &service-defaults
       max-file: "5"
 
 services:
+  caddy:
+    <<: *service-defaults
+    image: caddy:2.11.4-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infrastructure/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m
+    depends_on:
+      web:
+        condition: service_healthy
+      admin-web:
+        condition: service_healthy
+      server:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:2019/config/",
+        ]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    mem_limit: 128m
+    cpus: 0.25
   web:
     <<: *service-defaults
     image: ghcr.io/sunfloweriu/game-web:${IMAGE_TAG:?set_IMAGE_TAG}
