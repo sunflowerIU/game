@@ -12,51 +12,9 @@ x-service-defaults: &service-defaults
       max-file: "5"
 
 services:
-  nginx:
-    <<: *service-defaults
-    image: nginx:1.30.4-alpine
-    ports:
-      - "80:8080"
-      - "443:8443"
-    environment:
-      PLAYER_HOSTNAME: ${PLAYER_HOSTNAME}
-      ADMIN_HOSTNAME: ${ADMIN_HOSTNAME}
-    command: ["/bin/sh", "-c", "envsubst '$$PLAYER_HOSTNAME $$ADMIN_HOSTNAME' < /etc/nginx/nginx.conf.template > /tmp/nginx.conf && nginx -c /tmp/nginx.conf -g 'daemon off;'" ]
-    volumes:
-      - ./infrastructure/nginx/nginx.conf:/etc/nginx/nginx.conf.template:ro
-      - ./infrastructure/nginx/cloudflare-real-ip.conf:/etc/nginx/cloudflare-real-ip.conf:ro
-      - ./infrastructure/secrets/cloudflare-origin.pem:/run/secrets/origin.pem:ro
-      - ./infrastructure/secrets/cloudflare-origin-key.pem:/run/secrets/origin-key.pem:ro
-    read_only: true
-    tmpfs:
-      - /var/cache/nginx:size=32m
-      - /var/run:size=1m
-      - /tmp:size=8m
-    depends_on:
-      web:
-        condition: service_healthy
-      admin-web:
-        condition: service_healthy
-      server:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:8080/health/live"]
-      interval: 15s
-      timeout: 3s
-      retries: 5
-    mem_limit: 128m
-    cpus: 0.25
-
   web:
     <<: *service-defaults
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: web
-      args:
-        NEXT_PUBLIC_API_BASE_URL: ""
-        API_INTERNAL_URL: http://server:4000
-        NEXT_PUBLIC_PLAYER_ORIGIN: https://${PLAYER_HOSTNAME}
+    image: ghcr.io/sunfloweriu/game-web:${IMAGE_TAG:?set_IMAGE_TAG}
     environment:
       API_INTERNAL_URL: http://server:4000
     expose:
@@ -66,7 +24,15 @@ services:
       - /tmp:size=32m
       - /app/apps/web/.next/cache:size=64m,uid=1000,gid=1000
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3000/"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:3000/",
+        ]
       interval: 15s
       timeout: 3s
       retries: 5
@@ -76,13 +42,7 @@ services:
 
   admin-web:
     <<: *service-defaults
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: admin-web
-      args:
-        NEXT_PUBLIC_API_BASE_URL: ""
-        API_INTERNAL_URL: http://server:4000
+    image: ghcr.io/sunfloweriu/game-admin-web:${IMAGE_TAG:?set_IMAGE_TAG}
     environment:
       API_INTERNAL_URL: http://server:4000
     expose:
@@ -92,7 +52,15 @@ services:
       - /tmp:size=32m
       - /app/apps/admin-web/.next/cache:size=64m,uid=1000,gid=1000
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:3001/"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:3001/",
+        ]
       interval: 15s
       timeout: 3s
       retries: 5
@@ -102,10 +70,7 @@ services:
 
   server:
     <<: *service-defaults
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: server
+    image: ghcr.io/sunfloweriu/game-server:${IMAGE_TAG:?set_IMAGE_TAG}
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connect_timeout=10
       LOG_LEVEL: ${LOG_LEVEL:-info}
@@ -124,7 +89,15 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://127.0.0.1:4000/health/ready"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:4000/health/ready",
+        ]
       interval: 10s
       timeout: 3s
       retries: 10
@@ -134,10 +107,7 @@ services:
     cpus: 0.75
 
   migrate:
-    build:
-      context: .
-      dockerfile: Dockerfile
-      target: migrate
+    image: ghcr.io/sunfloweriu/game-migrate:${IMAGE_TAG:?set_IMAGE_TAG}
     environment:
       DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}?connect_timeout=10
     depends_on:
@@ -170,3 +140,5 @@ services:
 
 volumes:
   postgres-data:
+  caddy-data:
+  caddy-config:
