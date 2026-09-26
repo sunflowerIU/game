@@ -1,0 +1,67 @@
+neonstargame.duckdns.org {
+	encode zstd gzip
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' wss:; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+	}
+
+	@static path /_next/static/*
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	route {
+		@privateMetrics path /internal/metrics
+		respond @privateMetrics 404
+
+		@blockedAdmin path /api/v1/admin/*
+		respond @blockedAdmin 404
+
+		@backend path /api/* /health/*
+		reverse_proxy @backend server:4000
+
+		reverse_proxy web:3000
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
+
+neonstargameadmin.duckdns.org {
+	encode zstd gzip
+
+	header {
+		-Server
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+	}
+
+	@static path /_next/static/*
+	header @static Cache-Control "public, max-age=31536000, immutable"
+
+	route {
+		@privateMetrics path /internal/metrics
+		respond @privateMetrics 404
+
+		@allowedAdminAPI path /api/v1/me /api/v1/auth/* /api/v1/admin/*
+		reverse_proxy @allowedAdminAPI server:4000
+
+		@blockedAPI path /api/*
+		respond @blockedAPI 404
+
+		reverse_proxy admin-web:3001
+	}
+
+	log {
+		output stdout
+		format json
+	}
+}
