@@ -11,6 +11,8 @@ Neon Reels is an original five-reel, three-row mobile slot with five fixed payli
 - Five paylines are evaluated from the leftmost reel: middle, top, bottom, V, and inverted V.
 - Three or more consecutive matching symbols win. `WILD` substitutes for normal line symbols. `SCATTER` pays for three or more symbols anywhere.
 - The default aggregate win is capped at 100× the wager.
+- The balanced default profile targets approximately 31.2% hit frequency and 95.3% theoretical RTP (about 4.7% house edge). These are long-run mathematical expectations, not per-session guarantees.
+- Every default winning outcome returns at least 2× the wager; stake-only returns are not presented as wins.
 - Payout weights, symbol multipliers, allowed wager denominations, wager limits, and the cap are stored in the immutable game configuration revision and can be changed through the private admin application.
 
 ## Financial transaction
@@ -23,5 +25,5 @@ The server locks the player's wallet row and performs the session creation, wage
 - **A request is repeated:** the unique session-start key returns the existing completed spin.
 - **Two tabs spin against the same balance:** the wallet row lock serializes both transactions, preventing an overdraft.
 - **The process stops during a spin:** PostgreSQL rolls back the complete transaction; there is no partially debited spin.
-- **An administrator enters unsafe payout settings:** the registered game definition validates every immutable configuration revision before activation.
+- **An administrator enters malformed payout settings:** the registered game definition validates every immutable configuration revision before activation. Structural validation does not prove an RTP target, so the admin UI explicitly requires mathematical re-verification after a paytable change.
 - **Animation randomness is mistaken for result randomness:** client-side random symbols are visual anticipation only; the animation always lands on the authoritative result returned by the server.

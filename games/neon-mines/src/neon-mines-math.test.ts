@@ -77,9 +77,9 @@ test("liability guard blocks the risky next click before either cap can be excee
 });
 
 test("difficulty wager limits keep high-volatility modes conservative", () => {
-  assert.deepEqual(allowedWagers("EASY"), [10n, 25n, 50n, 100n, 200n, 500n]);
-  assert.deepEqual(allowedWagers("HARD"), [10n, 25n, 50n, 100n, 200n]);
-  assert.deepEqual(allowedWagers("EXPERT"), [10n, 25n, 50n, 100n]);
-  assert.throws(() => validateDifficultyWager("EXPERT", 500n), /not allowed/u);
-  assert.doesNotThrow(() => validateDifficultyWager("EXPERT", 100n));
+  assert.deepEqual(allowedWagers("EASY"), [10n, 25n, 50n, 100n, 200n, 500n, 1_000n, 2_000n, 5_000n]);
+  assert.deepEqual(allowedWagers("HARD"), [10n, 25n, 50n, 100n, 200n, 500n, 1_000n, 2_000n]);
+  assert.deepEqual(allowedWagers("EXPERT"), [10n, 25n, 50n, 100n, 200n, 500n, 1_000n]);
+  assert.throws(() => validateDifficultyWager("EXPERT", 2_000n), /not allowed/u);
+  assert.doesNotThrow(() => validateDifficultyWager("EXPERT", 1_000n));
 });

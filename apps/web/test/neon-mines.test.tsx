@@ -8,7 +8,7 @@ import { NeonMinesRound } from "../components/neon-mines-round";
 
 const initial: NeonMinesPublicState = { status: "ACTIVE", boardTiles: 25, difficulty: "EASY", mineCount: 3, entryAmount: "100", selectedTiles: [], revealedMines: [], detonatedTile: null, safeSelections: 0, currentCashOut: "0", nextSafePayout: "109", cashOutAvailable: false, nextSelectionAllowed: true };
 function render(state = initial, pending = false, needsSync = false) {
-  return renderToStaticMarkup(<NeonMinesRound state={state} expiresAt={null} pending={pending} needsSync={needsSync} onReconnect={() => undefined} onAction={async () => undefined} onDone={() => undefined} />);
+  return renderToStaticMarkup(<NeonMinesRound state={state} expiresAt={null} pending={pending} needsSync={needsSync} onReconnect={() => undefined} onAction={async () => undefined} onRestart={() => undefined} />);
 }
 
 test("Mines renders 25 accessible concealed tiles and disables premature cash-out", () => {
@@ -28,7 +28,12 @@ test("Mines displays server payouts, safe tiles, and terminal mine results", () 
   assert.equal((html.match(/disabled=""/gu) ?? []).length, 25);
   assert.match(html, /Tile 2, detonated mine/u);
   assert.match(html, /The wager was lost/u);
-  assert.match(html, /BACK TO GAMES/u);
+  assert.match(html, /Game over/u);
+  assert.match(html, /PLAY AGAIN/u);
+  assert.doesNotMatch(html, /BACK TO GAMES/u);
+  const restarting = render(lost, true);
+  assert.match(restarting, /STARTING…/u);
+  assert.match(restarting, /class="mines-done" disabled=""/u);
 });
 
 test("Mines blocks actions while pending or uncertain and offers reconnection", () => {

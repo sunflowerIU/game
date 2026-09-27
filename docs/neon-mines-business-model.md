@@ -10,11 +10,11 @@ This document fixes the Section 1 business assumptions before session, wallet, A
 | Return to player | 96% |
 | Theoretical house edge | 4% of settled wager volume |
 | Difficulties | Easy 3, Medium 5, Hard 10, Expert 15 mines |
-| Wagers | 0.10, 0.25, 0.50, 1, 2, 5 coins, restricted by difficulty |
+| Wagers | 0.10, 0.25, 0.50, 1, 2, 5, 10, 20, 50 coins, restricted by difficulty |
 | Maximum gross payout | 500 coins |
 | Maximum multiplier | 500× |
 
-Difficulty wager ceilings are 5 coins for Easy and Medium, 2 coins for Hard, and 1 coin for Expert. These are risk controls, not player-wallet limits.
+Difficulty wager ceilings are 50 coins for Easy and Medium, 20 coins for Hard, and 10 coins for Expert. These are risk controls, not player-wallet limits. The 500-coin gross payout cap still forces cash-out before a subsequent safe selection would exceed liability.
 
 ## Exact settlement
 

@@ -4,14 +4,14 @@ import type { NeonMinesAction, NeonMinesPublicState } from "@game-platform/contr
 import { useEffect, useState } from "react";
 import { formatCents } from "../lib/money";
 
-export function NeonMinesRound({ state, expiresAt, pending, needsSync, onReconnect, onAction, onDone }: Readonly<{
+export function NeonMinesRound({ state, expiresAt, pending, needsSync, onReconnect, onAction, onRestart }: Readonly<{
   state: NeonMinesPublicState;
   expiresAt: string | null;
   pending: boolean;
   needsSync: boolean;
   onReconnect: () => void;
   onAction: (action: NeonMinesAction) => Promise<void>;
-  onDone: () => void;
+  onRestart: () => void;
 }>) {
   const active = state.status === "ACTIVE";
   const [remaining, setRemaining] = useState(() => secondsRemaining(expiresAt));
@@ -25,7 +25,7 @@ export function NeonMinesRound({ state, expiresAt, pending, needsSync, onReconne
 
   const selected = new Set(state.selectedTiles);
   const mines = new Set(state.revealedMines);
-  const headline = state.status === "MINE_HIT" ? "Mine hit"
+  const headline = state.status === "MINE_HIT" ? "Game over"
     : state.status === "ABANDONED" ? "Round expired"
       : state.status === "CASHED_OUT" || state.status === "AUTO_CASHED_OUT" ? "Coins secured" : "Choose a tile";
 
@@ -55,7 +55,7 @@ export function NeonMinesRound({ state, expiresAt, pending, needsSync, onReconne
       {needsSync ? <button className="mines-done" disabled={pending} onClick={onReconnect}>{pending ? "RECONNECTING…" : "RECONNECT"}</button> : active ? <button className="mines-cashout" disabled={pending || !state.cashOutAvailable} onClick={() => void onAction({ action: "CASH_OUT" })}>
         <span>{pending ? "PLEASE WAIT" : state.cashOutAvailable ? "CASH OUT" : "PICK A SAFE TILE"}</span>
         <strong>{state.cashOutAvailable ? `${formatCents(state.currentCashOut)} COINS` : `BET ${formatCents(state.entryAmount)}`}</strong>
-      </button> : <button className="mines-done" onClick={onDone}>BACK TO GAMES</button>}
+      </button> : <button className="mines-done" disabled={pending} onClick={onRestart}>{pending ? "STARTING…" : "PLAY AGAIN"}</button>}
     </div>
   </section>;
 }

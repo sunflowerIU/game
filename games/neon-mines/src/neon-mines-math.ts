@@ -5,7 +5,7 @@ export const NEON_MINES_BOARD_TILES = 25;
 export const NEON_MINES_RETURN_BPS = 9_600;
 export const NEON_MINES_MAX_MULTIPLIER_BPS = 5_000_000;
 export const NEON_MINES_MAX_PAYOUT_CENTS = 50_000n;
-export const NEON_MINES_WAGERS_CENTS = [10n, 25n, 50n, 100n, 200n, 500n] as const;
+export const NEON_MINES_WAGERS_CENTS = [10n, 25n, 50n, 100n, 200n, 500n, 1_000n, 2_000n, 5_000n] as const;
 
 export interface NeonMinesDifficultyRule {
   readonly difficulty: NeonMinesDifficulty;
@@ -14,10 +14,10 @@ export interface NeonMinesDifficultyRule {
 }
 
 export const NEON_MINES_DIFFICULTIES: Readonly<Record<NeonMinesDifficulty, NeonMinesDifficultyRule>> = {
-  EASY: { difficulty: "EASY", mines: 3, maximumWagerCents: 500n },
-  MEDIUM: { difficulty: "MEDIUM", mines: 5, maximumWagerCents: 500n },
-  HARD: { difficulty: "HARD", mines: 10, maximumWagerCents: 200n },
-  EXPERT: { difficulty: "EXPERT", mines: 15, maximumWagerCents: 100n }
+  EASY: { difficulty: "EASY", mines: 3, maximumWagerCents: 5_000n },
+  MEDIUM: { difficulty: "MEDIUM", mines: 5, maximumWagerCents: 5_000n },
+  HARD: { difficulty: "HARD", mines: 10, maximumWagerCents: 2_000n },
+  EXPERT: { difficulty: "EXPERT", mines: 15, maximumWagerCents: 1_000n }
 };
 
 export interface ExactFraction {

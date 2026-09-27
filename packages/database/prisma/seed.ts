@@ -40,9 +40,9 @@ try {
       gameId: neonReels.id, version: "1.0.0", minimumEntry: 10n, maximumEntry: 5_000n,
       configuration: {
         rows: 3, reels: 5, maxWinMultiplier: 100, wagerDenominationsCents: [10, 50, 100, 500, 1_000, 2_000, 5_000],
-        weights: { LEMON: 30, CHERRY: 24, GEM: 18, BELL: 13, STAR: 8, SEVEN: 4, WILD: 3, SCATTER: 4 },
+        weights: { LEMON: 34, CHERRY: 27, GEM: 19, BELL: 12, STAR: 7, SEVEN: 3, WILD: 3, SCATTER: 4 },
         payouts: {
-          LEMON: { 3: 1, 4: 2, 5: 4 }, CHERRY: { 3: 1, 4: 3, 5: 6 }, GEM: { 3: 2, 4: 5, 5: 10 }, BELL: { 3: 3, 4: 8, 5: 15 },
+          LEMON: { 3: 2, 4: 2, 5: 5 }, CHERRY: { 3: 2, 4: 3, 5: 7 }, GEM: { 3: 2, 4: 5, 5: 10 }, BELL: { 3: 3, 4: 8, 5: 15 },
           STAR: { 3: 4, 4: 10, 5: 20 }, SEVEN: { 3: 6, 4: 15, 5: 30 }, WILD: { 3: 8, 4: 20, 5: 50 }
         },
         scatterPayouts: { 3: 2, 4: 5, 5: 12 }
@@ -64,13 +64,13 @@ try {
     where: { gameId_version_configurationRevision: { gameId: neonMines.id, version: "1.0.0", configurationRevision: 1 } },
     update: {},
     create: {
-      gameId: neonMines.id, version: "1.0.0", minimumEntry: 10n, maximumEntry: 500n,
+      gameId: neonMines.id, version: "1.0.0", minimumEntry: 10n, maximumEntry: 5_000n,
       configuration: {
         boardTiles: 25, returnBps: 9_600, maximumMultiplierBps: 5_000_000, maximumPayoutCents: 50_000,
-        wagerDenominationsCents: [10, 25, 50, 100, 200, 500],
+        wagerDenominationsCents: [10, 25, 50, 100, 200, 500, 1_000, 2_000, 5_000],
         difficulties: {
-          EASY: { mines: 3, maximumWagerCents: 500 }, MEDIUM: { mines: 5, maximumWagerCents: 500 },
-          HARD: { mines: 10, maximumWagerCents: 200 }, EXPERT: { mines: 15, maximumWagerCents: 100 }
+          EASY: { mines: 3, maximumWagerCents: 5_000 }, MEDIUM: { mines: 5, maximumWagerCents: 5_000 },
+          HARD: { mines: 10, maximumWagerCents: 2_000 }, EXPERT: { mines: 15, maximumWagerCents: 1_000 }
         }
       }
     }

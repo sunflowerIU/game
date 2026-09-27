@@ -67,7 +67,7 @@ export function parseNeonReelsConfiguration(value: Readonly<Record<string, unkno
   const rawPayouts = object(value.payouts, "payouts");
   const payouts = Object.fromEntries(NEON_REELS_SYMBOLS.filter((symbol) => symbol !== "SCATTER").map((symbol) => [symbol, countPayouts(rawPayouts[symbol], `payouts.${symbol}`)])) as unknown as NeonReelsConfiguration["payouts"];
   const scatterPayouts = countPayouts(value.scatterPayouts, "scatterPayouts");
-  const maxWinMultiplier = integer(value.maxWinMultiplier, 1, 10_000, "maxWinMultiplier");
+  const maxWinMultiplier = integer(value.maxWinMultiplier, 2, 10_000, "maxWinMultiplier");
   const wagerDenominationsCents = denominations(value.wagerDenominationsCents);
   return { rows: 3, reels: 5, weights, payouts, scatterPayouts, maxWinMultiplier, wagerDenominationsCents };
 }
@@ -114,7 +114,8 @@ function isSymbol(value: unknown): value is NeonReelsSymbol { return typeof valu
 function parseWinLine(value: unknown, index: number): NeonReelsWinLine { const line = object(value, `winLines.${index}`); const payline = integer(line.payline, 0, 4, "payline"); if (!isSymbol(line.symbol) || line.symbol === "SCATTER") throw new Error("Invalid win symbol"); const count = integer(line.count, 3, 5, "count") as 3 | 4 | 5; const multiplier = integer(line.multiplier, 0, 10_000, "multiplier"); return { payline, symbol: line.symbol, count, multiplier }; }
 function object(value: unknown, name: string): Record<string, unknown> { if (typeof value !== "object" || value === null || Array.isArray(value)) throw new Error(`Invalid ${name}`); return value as Record<string, unknown>; }
 function symbolNumbers(value: unknown, minimum: number, maximum: number, name: string): Record<NeonReelsSymbol, number> { const record = object(value, name); return Object.fromEntries(NEON_REELS_SYMBOLS.map((symbol) => [symbol, integer(record[symbol], minimum, maximum, `${name}.${symbol}`)])) as Record<NeonReelsSymbol, number>; }
-function countPayouts(value: unknown, name: string): Record<3 | 4 | 5, number> { const record = object(value, name); return { 3: integer(record["3"], 0, 10_000, `${name}.3`), 4: integer(record["4"], 0, 10_000, `${name}.4`), 5: integer(record["5"], 0, 10_000, `${name}.5`) }; }
+function countPayouts(value: unknown, name: string): Record<3 | 4 | 5, number> { const record = object(value, name); return { 3: payout(record["3"], `${name}.3`), 4: payout(record["4"], `${name}.4`), 5: payout(record["5"], `${name}.5`) }; }
+function payout(value: unknown, name: string): number { const multiplier = integer(value, 0, 10_000, name); if (multiplier === 1) throw new Error(`Invalid ${name}: stake-only returns cannot be wins`); return multiplier; }
 function denominations(value: unknown): readonly number[] {
   if (!Array.isArray(value) || value.length === 0 || value.length > 20) throw new Error("Invalid wagerDenominationsCents");
   const parsed = value.map((amount, index) => integer(amount, 1, 1_000_000_000, `wagerDenominationsCents.${index}`));

@@ -36,7 +36,7 @@ Its management panel rendered the expected fixed-rule summary and controls:
 - 25 tiles, 96% theoretical RTP, and 4% theoretical house edge;
 - 500x multiplier ceiling;
 - Easy 3/5.00, Medium 5/5.00, Hard 10/2.00, and Expert 15/1.00 limits;
-- 0.10 minimum wager, 5.00 maximum wager, and 500.00 gross payout cap.
+- 0.10 minimum wager, 50.00 maximum wager, and 500.00 gross payout cap.
 
 No configuration was changed through the browser.
 

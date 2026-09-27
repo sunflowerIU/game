@@ -12,7 +12,7 @@ Reels retains its existing screen. The existing mobile-only policy is unchanged.
    and next-safe amounts; these are gross returns, including the wager.
 3. Select a tile or cash out after a safe selection. Pending actions disable the
    board. Results reveal safe selections and, on loss, mines returned by the server.
-4. A completed round offers Back to Games and refreshes the wallet. Active rounds
+4. A completed round keeps the player in Neon Mines, refreshes the wallet, and offers Play Again with the same wager and difficulty. The header back control remains available. Active rounds
    are recovered at login/reload, including when a game has entered maintenance.
 
 Both portrait and landscape layouts are supported. Optional fullscreen does not
