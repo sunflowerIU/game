@@ -4,11 +4,13 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NeonMinesAdminFields, minesConfigurationFromForm } from "../components/neon-mines-admin-fields";
 
 test("Mines admin exposes coin limits, fixed odds and round revision policy", () => {
-  const html = renderToStaticMarkup(<NeonMinesAdminFields configuration={{ maximumPayoutCents: 50_000 }} minimumEntry="10" maximumEntry="500" />);
+  const html = renderToStaticMarkup(<NeonMinesAdminFields configuration={{ maximumPayoutCents: 50_000 }} minimumEntry="10" maximumEntry="5000" />);
   assert.match(html, /96% theoretical RTP/);
   assert.match(html, /active rounds retain their original settings/);
   assert.match(html, /name="maximumPayout"/);
   assert.match(html, /value="500.00"/);
+  assert.match(html, /50 coin max/);
+  assert.match(html, /value="50.00" selected/);
   assert.doesNotMatch(html, /textarea|unlimited/i);
 });
 

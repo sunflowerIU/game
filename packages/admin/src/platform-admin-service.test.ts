@@ -28,16 +28,16 @@ test("players cannot inspect platform administration data", async () => {
   assert.throws(() => new PlatformAdminService(new Repository(), valid).listGames(player), (error: unknown) => error instanceof PlatformAdminError && error.code === "ACCESS_DENIED");
 });
 
-const minesConfig = { maximumPayoutCents: 50_000, wagerDenominationsCents: [10, 25, 50, 100, 200, 500], difficulties: {
-  EASY: { mines: 3, maximumWagerCents: 500 }, MEDIUM: { mines: 5, maximumWagerCents: 500 },
-  HARD: { mines: 10, maximumWagerCents: 200 }, EXPERT: { mines: 15, maximumWagerCents: 100 }
+const minesConfig = { maximumPayoutCents: 50_000, wagerDenominationsCents: [10, 25, 50, 100, 200, 500, 1_000, 2_000, 5_000], difficulties: {
+  EASY: { mines: 3, maximumWagerCents: 5_000 }, MEDIUM: { mines: 5, maximumWagerCents: 5_000 },
+  HARD: { mines: 10, maximumWagerCents: 2_000 }, EXPERT: { mines: 15, maximumWagerCents: 1_000 }
 } };
-const mines: AdminGameRecord = { ...game, slug: "neon-mines", maximumEntry: 500n, configuration: minesConfig };
-const change = { gameId: game.id, minimumEntry: "10", maximumEntry: "500", configuration: minesConfig, reason: "Adjust payout reserve", ipAddress: "127.0.0.1", userAgent: null };
+const mines: AdminGameRecord = { ...game, slug: "neon-mines", maximumEntry: 5_000n, configuration: minesConfig };
+const change = { gameId: game.id, minimumEntry: "10", maximumEntry: "5000", configuration: minesConfig, reason: "Adjust payout reserve", ipAddress: "127.0.0.1", userAgent: null };
 
 test("Mines limits preserve a playable wager for each difficulty and reject insufficient liability caps", async () => {
-  for (const patch of [{ maximumEntry: "0" }, { minimumEntry: "11" }, { minimumEntry: "200" },
-    { configuration: { ...minesConfig, maximumPayoutCents: 599 } }]) {
+  for (const patch of [{ maximumEntry: "0" }, { minimumEntry: "11" }, { minimumEntry: "2000" },
+    { configuration: { ...minesConfig, maximumPayoutCents: 5_999 } }]) {
     const repository = new Repository(mines);
     await assert.rejects(new PlatformAdminService(repository, valid).updateConfiguration(admin, { ...change, ...patch }),
       (error: unknown) => error instanceof PlatformAdminError && error.code === "INVALID_REQUEST");
@@ -46,7 +46,7 @@ test("Mines limits preserve a playable wager for each difficulty and reject insu
 });
 
 test("Mines accepts the exact first-payout boundary and a reduced wager/cap revision", async () => {
-  for (const [maximumEntry, maximumPayoutCents] of [["500", 600], ["10", 25]] as const) {
+  for (const [maximumEntry, maximumPayoutCents] of [["5000", 6_000], ["10", 25]] as const) {
     const repository = new Repository(mines);
     await new PlatformAdminService(repository, valid).updateConfiguration(admin, { ...change, maximumEntry, configuration: { ...minesConfig, maximumPayoutCents } });
     assert.equal(repository.revision?.maximumEntry, BigInt(maximumEntry));

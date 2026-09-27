@@ -20,8 +20,8 @@ Additional administrative validation requires:
 - Every difficulty retains at least one eligible wager.
 - The payout cap covers the first safe selection of every offered wager.
 
-For example, allowing the full launch range needs at least a 6-coin payout cap
-(the first Medium safe selection at a 5-coin wager). Restricting all wagers to
+For example, allowing the full range needs at least a 60-coin payout cap
+(the first Medium safe selection at a 50-coin wager). Restricting all wagers to
 0.10 coins permits the minimum 0.25-coin cap. Later selections still use the
 engine's existing liability stop/automatic cash-out rules.
 
