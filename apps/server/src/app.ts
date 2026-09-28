@@ -14,7 +14,8 @@ import { registerWalletRoutes, type WalletApplication } from "./wallet-routes.js
 import { registerGameRoutes, type GameCatalogApplication } from "./game-routes.js";
 import { registerGameSessionRoutes, type GameSessionApplication } from "./game-session-routes.js";
 import { NeonReelsError } from "@game-platform/neon-reels";
-import { NeonMinesRequestError } from "@game-platform/contracts";
+import { NeonDiceServiceError } from "@game-platform/neon-dice";
+import { NeonDiceRequestError, NeonMinesRequestError } from "@game-platform/contracts";
 import { NeonMinesError } from "./adapters/prisma-neon-mines-repository.js";
 import { registerPlatformAdminRoutes, type PlatformAdminService } from "./platform-admin-routes.js";
 import { registerObservability } from "./observability.js";
@@ -142,7 +143,13 @@ export function buildApp(config: ServerConfig, dependencies: AppDependencies): F
 }
 
 function mapError(error: unknown): AppError {
+  if (error instanceof NeonDiceRequestError) return new AppError("INVALID_REQUEST", 400, error.message);
   if (error instanceof NeonMinesRequestError) return new AppError("INVALID_REQUEST", 400, error.message);
+  if (error instanceof NeonDiceServiceError) {
+    const statusCode = error.code === "ACCESS_DENIED" ? 403 : error.code === "GAME_NOT_AVAILABLE" ? 404
+      : error.code === "INSUFFICIENT_BALANCE" ? 422 : error.code === "INVALID_ENTRY" ? 400 : 409;
+    return new AppError(error.code, statusCode, error.message);
+  }
   if (error instanceof NeonMinesError) {
     const status = error.code === "ACCESS_DENIED" ? 403 : error.code === "SESSION_NOT_FOUND" || error.code === "GAME_NOT_AVAILABLE" ? 404 : error.code === "INSUFFICIENT_BALANCE" ? 422 : error.code === "INVALID_ENTRY" || error.code === "INVALID_GAME_INPUT" ? 400 : 409;
     return new AppError(error.code, status, error.message);
@@ -180,5 +187,8 @@ function mapError(error: unknown): AppError {
     : {};
   if (externalError.statusCode === 429) return new AppError("RATE_LIMITED", 429, "Too many requests");
   if (externalError.validation !== undefined) return new AppError("INVALID_REQUEST", 400, "Request validation failed");
+  if (Number.isInteger(externalError.statusCode) && externalError.statusCode! >= 400 && externalError.statusCode! < 500) {
+    return new AppError("INVALID_REQUEST", externalError.statusCode!, "Request could not be processed");
+  }
   return new AppError("INTERNAL_ERROR", 500, "An unexpected error occurred");
 }

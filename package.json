@@ -9,7 +9,7 @@
   "scripts": {
     "postinstall": "pnpm db:generate",
     "dev": "pnpm --parallel --filter @game-platform/contracts --filter @game-platform/server --filter @game-platform/web --filter @game-platform/admin-web dev",
-    "build": "pnpm --filter @game-platform/auth build && pnpm --filter @game-platform/admin build && pnpm --filter @game-platform/wallet build && pnpm --filter @game-platform/game-core build && pnpm --filter @game-platform/neon-reels build && pnpm --filter @game-platform/contracts build && pnpm --filter @game-platform/neon-mines build && pnpm --filter @game-platform/database build && pnpm --filter @game-platform/server build && pnpm --filter @game-platform/web build && pnpm --filter @game-platform/admin-web build",
+    "build": "pnpm --filter @game-platform/auth build && pnpm --filter @game-platform/admin build && pnpm --filter @game-platform/wallet build && pnpm --filter @game-platform/game-core build && pnpm --filter @game-platform/neon-reels build && pnpm --filter @game-platform/contracts build && pnpm --filter @game-platform/neon-mines build && pnpm --filter @game-platform/neon-dice build && pnpm --filter @game-platform/database build && pnpm --filter @game-platform/server build && pnpm --filter @game-platform/web build && pnpm --filter @game-platform/admin-web build",
     "typecheck": "pnpm -r typecheck",
     "lint": "pnpm -r lint",
     "test": "pnpm -r test",

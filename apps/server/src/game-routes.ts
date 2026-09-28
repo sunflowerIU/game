@@ -7,7 +7,7 @@ export interface GameCatalogApplication { listGames(principal: AuthorizedPrincip
 
 const gameSchema = { type: "object", additionalProperties: false, required: ["id", "slug", "name", "status", "gameType", "version", "minimumEntry", "maximumEntry", "configuration"], properties: {
   id: { type: "string", format: "uuid" }, slug: { type: "string" }, name: { type: "string" }, status: { type: "string", const: "ACTIVE" },
-  gameType: { type: "string", enum: ["SINGLE_PLAYER", "MULTIPLAYER"] }, version: { type: "string" }, minimumEntry: { type: "string", pattern: "^[0-9]+$" }, maximumEntry: { type: "string", pattern: "^[0-9]+$" }, configuration: { type: "object" }
+  gameType: { type: "string", enum: ["SINGLE_PLAYER", "MULTIPLAYER"] }, version: { type: "string" }, minimumEntry: { type: "string", pattern: "^[0-9]+$" }, maximumEntry: { type: "string", pattern: "^[0-9]+$" }, configuration: { type: "object", additionalProperties: true }
 } } as const;
 
 export async function registerGameRoutes(app: FastifyInstance, catalog: GameCatalogApplication): Promise<void> {
