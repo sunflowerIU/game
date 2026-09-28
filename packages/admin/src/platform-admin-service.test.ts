@@ -74,3 +74,41 @@ test("Mines configuration and status writes require GAME_MANAGE", async () => {
   await assert.rejects(service.setGameStatus(viewer, { ...change, status: "ACTIVE" }), (error: unknown) => error instanceof PlatformAdminError && error.code === "ACCESS_DENIED");
   assert.equal(repository.status, null); assert.equal(repository.revision, null);
 });
+
+const diceConfig = {
+  returnBps: 9_500,
+  multiplierBps: { UNDER_7: 22_800, EXACTLY_7: 57_000, OVER_7: 22_800 },
+  wagerDenominationsCents: [50, 100, 200, 500, 1_000, 2_000, 3_000],
+  maximumPayoutCents: 20_000
+};
+const dice: AdminGameRecord = { ...game, slug: "neon-dice", name: "Neon Dice", status: "DISABLED", minimumEntry: 50n, maximumEntry: 3_000n, configuration: diceConfig };
+const diceChange = { gameId: game.id, minimumEntry: "50", maximumEntry: "3000", configuration: diceConfig, reason: "Adjust Dice wagers", ipAddress: "127.0.0.1", userAgent: null };
+
+test("Dice revisions require catalog limits to match the enabled wager endpoints", async () => {
+  for (const patch of [{ minimumEntry: "100" }, { maximumEntry: "2000" }, { maximumEntry: "0" }]) {
+    const repository = new Repository(dice);
+    await assert.rejects(new PlatformAdminService(repository, valid).updateConfiguration(admin, { ...diceChange, ...patch }),
+      (error: unknown) => error instanceof PlatformAdminError && error.code === "INVALID_REQUEST");
+    assert.equal(repository.revision, null);
+  }
+});
+
+test("Dice accepts a safe reduced wager set and validates it again before activation", async () => {
+  const reduced = { ...diceConfig, wagerDenominationsCents: [100, 500, 1_000], maximumPayoutCents: 5_700 };
+  const repository = new Repository({ ...dice, minimumEntry: 100n, maximumEntry: 1_000n, configuration: reduced });
+  const service = new PlatformAdminService(repository, valid);
+  await service.updateConfiguration(admin, { ...diceChange, minimumEntry: "100", maximumEntry: "1000", configuration: reduced });
+  assert.equal(repository.revision?.minimumEntry, 100n);
+  assert.equal(repository.revision?.maximumEntry, 1_000n);
+  await service.setGameStatus(admin, { ...diceChange, status: "ACTIVE" });
+  assert.equal(repository.status?.status, "ACTIVE");
+});
+
+test("Dice rejects an inadequate payout reserve on revision and activation", async () => {
+  const unsafe = { ...diceConfig, maximumPayoutCents: 17_099 };
+  const repository = new Repository({ ...dice, configuration: unsafe });
+  const service = new PlatformAdminService(repository, valid);
+  await assert.rejects(service.updateConfiguration(admin, { ...diceChange, configuration: unsafe }), PlatformAdminError);
+  await assert.rejects(service.setGameStatus(admin, { ...diceChange, status: "ACTIVE" }), PlatformAdminError);
+  assert.equal(repository.revision, null); assert.equal(repository.status, null);
+});

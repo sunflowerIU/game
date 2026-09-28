@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 
-export type GameMusicScene = "off" | "lobby" | "neon-reels" | "neon-mines";
-export type GameSoundEffect = "click" | "login" | "reel-spin" | "reel-win" | "reel-lose" | "mine-pick" | "mine-hit" | "cash-out";
+export type GameMusicScene = "off" | "lobby" | "neon-reels" | "neon-mines" | "neon-dice";
+export type GameSoundEffect = "click" | "login" | "reel-spin" | "reel-win" | "reel-lose" | "mine-pick" | "mine-hit" | "cash-out" | "dice-roll" | "dice-impact" | "dice-win" | "dice-lose";
 
 export function useGameAudio(scene: GameMusicScene) {
   const [engine] = useState(() => new GameAudioEngine());
@@ -129,6 +129,27 @@ class GameAudioEngine {
         [392, 493.88, 587.33, 783.99].forEach((frequency, index) => this.tone(frequency, frequency * 1.015, now + index * 0.09, 0.42, "sine", 0.072, output, 0.018));
         this.tone(196, 392, now, 0.68, "triangle", 0.048, output, 0.04);
       }
+      if (effect === "dice-roll") {
+        this.duckMusic(now, 0.72, 0.42);
+        this.filteredNoise(now, 0.72, 0.038, output, 2_600);
+        [146.83, 196, 246.94, 329.63, 392].forEach((frequency, index) => this.tone(frequency, frequency * 1.55, now + index * 0.085, 0.18, "triangle", 0.034, output, 0.008));
+        this.tone(82.41, 164.81, now, 0.68, "sawtooth", 0.028, output, 0.025);
+      }
+      if (effect === "dice-impact") {
+        this.filteredNoise(now, 0.18, 0.072, output, 430);
+        this.tone(110, 52, now, 0.24, "sine", 0.095, output, 0.004);
+        this.tone(220, 130.81, now + 0.045, 0.19, "triangle", 0.052, output, 0.005);
+      }
+      if (effect === "dice-win") {
+        this.duckMusic(now, 0.92, 0.55);
+        [392, 493.88, 587.33, 783.99, 987.77].forEach((frequency, index) => this.tone(frequency, frequency * 1.008, now + 0.045 + index * 0.075, 0.5, "sine", 0.069, output, 0.018));
+        [196, 293.66, 392].forEach((frequency, index) => this.tone(frequency, frequency * 2, now + index * 0.055, 0.82, "triangle", 0.038, output, 0.045));
+      }
+      if (effect === "dice-lose") {
+        this.duckMusic(now, 0.48, 0.68);
+        this.tone(293.66, 220, now + 0.04, 0.3, "triangle", 0.043, output, 0.025);
+        this.tone(196, 146.83, now + 0.19, 0.38, "sine", 0.038, output, 0.035);
+      }
     }).catch(() => undefined);
   }
 
@@ -158,6 +179,7 @@ class GameAudioEngine {
       if (this.scene === "lobby") this.playLobbyStep(now, this.musicStep);
       if (this.scene === "neon-reels") this.playReelsStep(now, this.musicStep);
       if (this.scene === "neon-mines") this.playMinesStep(now, this.musicStep);
+      if (this.scene === "neon-dice") this.playDiceStep(now, this.musicStep);
       this.musicStep += 1;
     };
     playStep();
@@ -210,6 +232,32 @@ class GameAudioEngine {
     if (step % 4 === 3) this.filteredNoise(now + 0.18, 0.32, 0.012, this.music, 900);
   }
 
+  private playDiceStep(now: number, step: number): void {
+    if (this.music === null) return;
+    const roots = [73.42, 73.42, 98, 87.31, 65.41, 65.41, 87.31, 98];
+    const root = roots[Math.floor(step / 2) % roots.length] ?? 73.42;
+    if (step % 2 === 0) {
+      this.tone(root, root * 1.002, now, 1.45, "sine", 0.042, this.music, 0.22);
+      this.tone(root * 1.5, root * 1.497, now + 0.035, 1.25, "triangle", 0.019, this.music, 0.18);
+    }
+    const orbit = [293.66, 349.23, 440, 523.25, 392, 523.25, 587.33, 440, 329.63, 392, 493.88, 587.33];
+    const note = orbit[step % orbit.length] ?? 293.66;
+    this.tone(note, note * 1.006, now + 0.045, 0.4, step % 3 === 0 ? "triangle" : "sine", 0.025, this.music, 0.018);
+    if (step % 4 === 1) this.tone(note * 2, note * 2.008, now + 0.25, 0.28, "sine", 0.012, this.music, 0.015);
+    if (step % 4 === 2) this.filteredNoise(now + 0.08, 0.055, 0.012, this.music, 3_800);
+    if (step % 8 === 7) this.tone(880, 1_174.66, now + 0.18, 0.42, "sine", 0.018, this.music, 0.02);
+  }
+
+  private duckMusic(now: number, duration: number, depth: number): void {
+    if (this.music === null) return;
+    const normal = sceneVolume(this.scene);
+    this.music.gain.cancelScheduledValues(now);
+    this.music.gain.setValueAtTime(this.music.gain.value, now);
+    this.music.gain.linearRampToValueAtTime(normal * depth, now + 0.035);
+    this.music.gain.setValueAtTime(normal * depth, now + Math.max(0.04, duration - 0.2));
+    this.music.gain.linearRampToValueAtTime(normal, now + duration);
+  }
+
   private tone(startFrequency: number, endFrequency: number, start: number, duration: number, type: OscillatorType, volume: number, destination: AudioNode, attack = 0.012): void {
     if (this.context === null) return;
     const oscillator = this.context.createOscillator();
@@ -239,9 +287,9 @@ class GameAudioEngine {
 }
 
 function sceneInterval(scene: Exclude<GameMusicScene, "off">): number {
-  return scene === "lobby" ? 860 : scene === "neon-reels" ? 430 : 680;
+  return scene === "lobby" ? 860 : scene === "neon-reels" ? 430 : scene === "neon-dice" ? 520 : 680;
 }
 
 function sceneVolume(scene: GameMusicScene): number {
-  return scene === "off" ? 0 : scene === "neon-reels" ? 0.28 : scene === "neon-mines" ? 0.32 : 0.35;
+  return scene === "off" ? 0 : scene === "neon-reels" ? 0.28 : scene === "neon-mines" ? 0.32 : scene === "neon-dice" ? 0.3 : 0.35;
 }

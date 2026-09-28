@@ -85,12 +85,15 @@ importers:
       '@game-platform/game-core':
         specifier: workspace:*
         version: link:../../packages/game-core
-      '@game-platform/neon-reels':
+      '@game-platform/neon-dice':
         specifier: workspace:*
-        version: link:../../games/neon-reels
+        version: link:../../games/neon-dice
       '@game-platform/neon-mines':
         specifier: workspace:*
         version: link:../../games/neon-mines
+      '@game-platform/neon-reels':
+        specifier: workspace:*
+        version: link:../../games/neon-reels
       '@game-platform/wallet':
         specifier: workspace:*
         version: link:../../packages/wallet
@@ -168,6 +171,25 @@ importers:
       tailwindcss:
         specifier: 4.3.3
         version: 4.3.3
+      tsx:
+        specifier: 4.23.12
+        version: 4.23.12
+      typescript:
+        specifier: 6.0.3
+        version: 6.0.3
+
+  games/neon-dice:
+    dependencies:
+      '@game-platform/auth':
+        specifier: workspace:*
+        version: link:../../packages/auth
+      '@game-platform/game-core':
+        specifier: workspace:*
+        version: link:../../packages/game-core
+    devDependencies:
+      '@types/node':
+        specifier: 26.2.0
+        version: 26.2.0
       tsx:
         specifier: 4.23.12
         version: 4.23.12

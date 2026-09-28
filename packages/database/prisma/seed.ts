@@ -79,6 +79,29 @@ try {
     await prisma.game.update({ where: { id: neonMines.id }, data: { activeVersionId: neonMinesVersion.id } });
   }
 
+  const neonDice = await prisma.game.upsert({
+    where: { slug: "neon-dice" },
+    update: { name: "Neon Dice", gameType: "SINGLE_PLAYER" },
+    create: { slug: "neon-dice", name: "Neon Dice", gameType: "SINGLE_PLAYER", status: "DISABLED" }
+  });
+  const neonDiceVersion = await prisma.gameVersion.upsert({
+    where: { gameId_version_configurationRevision: { gameId: neonDice.id, version: "1.0.0", configurationRevision: 1 } },
+    update: {},
+    create: {
+      gameId: neonDice.id, version: "1.0.0", minimumEntry: 50n, maximumEntry: 3_000n,
+      configuration: {
+        returnBps: 9_500,
+        multiplierBps: { UNDER_7: 22_800, EXACTLY_7: 57_000, OVER_7: 22_800 },
+        wagerDenominationsCents: [50, 100, 200, 500, 1_000, 2_000, 3_000],
+        maximumPayoutCents: 20_000
+      }
+    }
+  });
+  // Repeatable seeding never enables Dice or replaces a later immutable revision.
+  if (neonDice.activeVersionId === null) {
+    await prisma.game.update({ where: { id: neonDice.id }, data: { activeVersionId: neonDiceVersion.id } });
+  }
+
   const username = process.env.BOOTSTRAP_ADMIN_USERNAME?.trim();
   const password = process.env.BOOTSTRAP_ADMIN_PASSWORD;
 

@@ -6,6 +6,7 @@ import { PlatformAdminService, PlayerAdminService } from "@game-platform/admin";
 import { createDatabaseClient } from "@game-platform/database";
 import { WalletService } from "@game-platform/wallet";
 import { GameCatalogService, GameRegistry } from "@game-platform/game-core";
+import { NeonDiceDefinition, NeonDiceService } from "@game-platform/neon-dice";
 import { NeonReelsDefinition, NeonReelsService } from "@game-platform/neon-reels";
 import { NeonMinesDefinition } from "@game-platform/neon-mines";
 import { PrismaNeonMinesRepository } from "./adapters/prisma-neon-mines-repository.js";
@@ -16,6 +17,7 @@ import { PrismaPlayerAdminRepository } from "./adapters/prisma-player-admin-repo
 import { PrismaWalletRepository } from "./adapters/prisma-wallet-repository.js";
 import { PrismaGameCatalogRepository } from "./adapters/prisma-game-catalog-repository.js";
 import { PrismaNeonReelsRepository } from "./adapters/prisma-neon-reels-repository.js";
+import { PrismaNeonDiceRepository } from "./adapters/prisma-neon-dice-repository.js";
 import { PrismaPlatformAdminRepository } from "./adapters/prisma-platform-admin-repository.js";
 import { buildApp } from "./app.js";
 import { loadConfig } from "./config.js";
@@ -35,10 +37,12 @@ const auth = new AuthService(
 const gameRegistry = new GameRegistry();
 gameRegistry.register(new NeonReelsDefinition());
 gameRegistry.register(new NeonMinesDefinition());
+gameRegistry.register(new NeonDiceDefinition());
 const serverInstanceId = `game-server:${crypto.randomUUID()}`;
 const neonReels = new NeonReelsService(new PrismaNeonReelsRepository(database), serverInstanceId);
 const neonMines = new PrismaNeonMinesRepository(database);
-const gameSessions = new DurableGameSessions(database, neonReels, neonMines);
+const neonDice = new NeonDiceService(new PrismaNeonDiceRepository(database), serverInstanceId);
+const gameSessions = new DurableGameSessions(database, neonReels, neonMines, neonDice);
 const app = buildApp(config, {
   admin: new PlayerAdminService(new PrismaPlayerAdminRepository(database), passwordHasher),
   platformAdmin: new PlatformAdminService(new PrismaPlatformAdminRepository(database), (slug, version, configuration) => gameRegistry.require(slug, version).validateConfiguration(configuration)),

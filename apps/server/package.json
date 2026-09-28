@@ -22,6 +22,7 @@
     "@game-platform/contracts": "workspace:*",
     "@game-platform/database": "workspace:*",
     "@game-platform/game-core": "workspace:*",
+    "@game-platform/neon-dice": "workspace:*",
     "@game-platform/neon-reels": "workspace:*",
     "@game-platform/neon-mines": "workspace:*",
     "@game-platform/wallet": "workspace:*",

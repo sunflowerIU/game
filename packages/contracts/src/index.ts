@@ -212,3 +212,4 @@ export interface GameHistoryResponse { readonly sessions: readonly GameSessionSu
 export interface ActiveGameSessionResponse { readonly active: StartGameSessionResponse | null }
 
 export * from "./neon-mines.js";
+export * from "./neon-dice.js";
