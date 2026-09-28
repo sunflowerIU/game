@@ -1,14 +1,14 @@
 import type { AuthorizedPrincipal } from "@game-platform/auth";
-import { parseNeonMinesCommandRequest, parseStartNeonMinesSessionRequest, NeonMinesRequestError, type NeonMinesCommandRequest, type NeonMinesCommandResponse, type NeonMinesDifficulty, type ActiveGameSessionResponse, type GameHistoryResponse, type GameSessionSummary, type StartGameSessionResponse } from "@game-platform/contracts";
+import { parseNeonMinesCommandRequest, parseStartNeonMinesSessionRequest, parseStartNeonDiceSessionRequest, NeonMinesRequestError, type NeonDiceSelection, type NeonMinesCommandRequest, type NeonMinesCommandResponse, type NeonMinesDifficulty, type ActiveGameSessionResponse, type GameHistoryResponse, type GameSessionSummary, type StartGameSessionResponse } from "@game-platform/contracts";
 import { AppError } from "./errors.js";
 import type { FastifyInstance, FastifyRequest } from "fastify";
 
 interface GameParams { readonly gameId: string }
-interface StartBody { readonly entryAmount: number; readonly difficulty?: NeonMinesDifficulty }
+interface StartBody { readonly entryAmount: number; readonly difficulty?: NeonMinesDifficulty; readonly selection?: NeonDiceSelection }
 interface StartHeaders { readonly "idempotency-key": string }
 interface GameSessionRecord { readonly id: string; readonly gameId: string; readonly gameVersion: string; readonly status: "CREATED" | "ACTIVE" | "COMPLETED" | "ABANDONED" | "FAILED"; readonly entryAmount: bigint; readonly startedAt: Date; readonly completedAt: Date | null; readonly score: number | null; readonly reward: bigint | null }
 export interface GameSessionApplication {
-  start(principal: AuthorizedPrincipal, input: { readonly gameId: string; readonly entryAmount: bigint; readonly difficulty?: NeonMinesDifficulty; readonly idempotencyKey: string; readonly ipAddress: string }): Promise<{ readonly session: GameSessionRecord; readonly publicState: unknown; readonly replayed: boolean; readonly nextSequence: number; readonly expiresAt?: string | null }>;
+  start(principal: AuthorizedPrincipal, input: { readonly gameId: string; readonly entryAmount: bigint; readonly difficulty?: NeonMinesDifficulty; readonly selection?: NeonDiceSelection; readonly idempotencyKey: string; readonly ipAddress: string }): Promise<{ readonly session: GameSessionRecord; readonly publicState: unknown; readonly replayed: boolean; readonly nextSequence: number; readonly expiresAt?: string | null }>;
   history(principal: AuthorizedPrincipal): Promise<readonly GameSessionRecord[]>;
   resume(principal: AuthorizedPrincipal): Promise<{ readonly session: GameSessionRecord; readonly publicState: unknown; readonly nextSequence: number; readonly expiresAt?: string | null } | null>;
   command?(principal: AuthorizedPrincipal, sessionId: string, input: NeonMinesCommandRequest): Promise<{ readonly session: GameSessionRecord; readonly publicState: NeonMinesCommandResponse["publicState"]; readonly nextSequence: number; readonly expiresAt: string | null; readonly replayed: boolean; readonly acceptedSequence: number }>;
@@ -29,7 +29,7 @@ export async function registerGameSessionRoutes(app: FastifyInstance, sessions: 
       response: { 200: { type: "object", additionalProperties: false, required: ["session", "publicState", "replayed", "nextSequence"], properties: { session: sessionSchema, publicState: {}, replayed: { type: "boolean" }, nextSequence: { type: "integer", minimum: 1 }, expiresAt: { anyOf: [{ type: "string" }, { type: "null" }] } } } }
     }
   }, async (request) => {
-    const result = await sessions.start(requirePrincipal(request), { gameId: request.params.gameId, entryAmount: BigInt(request.body.entryAmount), ...(request.body.difficulty === undefined ? {} : { difficulty: request.body.difficulty }), idempotencyKey: request.headers["idempotency-key"], ipAddress: request.ip });
+    const result = await sessions.start(requirePrincipal(request), { gameId: request.params.gameId, entryAmount: BigInt(request.body.entryAmount), ...(request.body.difficulty === undefined ? {} : { difficulty: request.body.difficulty }), ...(request.body.selection === undefined ? {} : { selection: request.body.selection }), idempotencyKey: request.headers["idempotency-key"], ipAddress: request.ip });
     return { ...result, session: toSummary(result.session) };
   });
   app.get<{ Reply: GameHistoryResponse }>("/api/v1/game-sessions", { preHandler: app.authenticate, schema: { response: { 200: { type: "object", required: ["sessions"], properties: { sessions: { type: "array", items: sessionSchema } } } } } }, async (request) => ({ sessions: (await sessions.history(requirePrincipal(request))).map(toSummary) }));
@@ -50,6 +50,7 @@ export async function registerGameSessionRoutes(app: FastifyInstance, sessions: 
 }
 function parseStartBody(raw: unknown): StartBody {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) throw new NeonMinesRequestError("Invalid game start input");
+  if ("selection" in raw) return parseStartNeonDiceSessionRequest(raw);
   if ("difficulty" in raw) return parseStartNeonMinesSessionRequest(raw);
   const value = raw as Record<string, unknown>;
   if (Object.keys(value).length !== 1 || !Number.isSafeInteger(value.entryAmount) || (value.entryAmount as number) < 1 || (value.entryAmount as number) > 1_000_000_000) throw new NeonMinesRequestError("Wager must be integer cents");

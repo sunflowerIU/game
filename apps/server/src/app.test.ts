@@ -5,7 +5,7 @@ import { buildApp } from "./app.js";
 import { WalletEventBroker } from "./wallet-events.js";
 import { NeonMinesEngine } from "@game-platform/neon-mines";
 import { NeonMinesError } from "./adapters/prisma-neon-mines-repository.js";
-import type { NeonMinesCommandRequest } from "@game-platform/contracts";
+import type { NeonDiceSelection, NeonMinesCommandRequest } from "@game-platform/contracts";
 import type { ServerConfig } from "./config.js";
 
 const authenticatedPrincipal = {
@@ -68,8 +68,13 @@ const wallet = {
   credit: async (_principal: unknown, input: { idempotencyKey: string }) => { receivedIdempotencyKey = input.idempotencyKey; return { wallet: walletRecord, entry: ledgerRecord, replayed: false }; },
   debit: async () => { throw new Error("not used"); }
 };
-const gameCatalog = { listGames: async () => [] };
-const receivedGameStarts: { entryAmount: bigint; idempotencyKey: string }[] = [];
+const catalogGame = {
+  id: "f41f6329-b3db-4531-922b-c7ec4c54e17e", slug: "neon-dice", name: "Neon Dice", status: "ACTIVE" as const,
+  gameType: "SINGLE_PLAYER" as const, version: "1.0.0", minimumEntry: 50n, maximumEntry: 3_000n,
+  configuration: { wagerDenominationsCents: [50, 100, 200, 500, 1_000, 2_000, 3_000], maximumPayoutCents: 20_000 }
+};
+const gameCatalog = { listGames: async () => [catalogGame] };
+const receivedGameStarts: { entryAmount: bigint; idempotencyKey: string; selection?: NeonDiceSelection }[] = [];
 const gameSession = { id: "2c84e3d5-4ba7-49ec-9c57-70ea25f30131", gameId: "d9ab8c9e-c72f-4c87-b6eb-e61267269b61", gameVersion: "1.0.0", status: "COMPLETED" as const, entryAmount: 10n, startedAt: new Date("2026-08-25T10:00:00.000Z"), completedAt: new Date("2026-08-25T10:00:00.000Z"), score: 0, reward: 0n };
 const receivedMinesCommands: NeonMinesCommandRequest[] = [];
 const gameSessions = {
@@ -137,6 +142,24 @@ test("Mines start rejects tampering and preserves typed difficulty", async () =>
   const response = await app.inject({ method: "POST", url, headers, payload });
   assert.equal(response.statusCode, 200);
   assert.equal((receivedGameStarts.at(-1) as { difficulty?: string }).difficulty, "HARD");
+});
+
+test("Dice start accepts only an exact wager and selection contract", async () => {
+  const url = `/api/v1/games/${gameSession.gameId}/sessions`;
+  const headers = { cookie: `gp_session=${"B".repeat(43)}`, "idempotency-key": "dice-start-00000001" };
+  const payload = { entryAmount: 500, selection: "EXACTLY_7" };
+  for (const body of [
+    { ...payload, entryAmount: "500" },
+    { ...payload, selection: "SEVEN" },
+    { ...payload, dice: [3, 4] },
+    { ...payload, reward: 2_850 },
+    { ...payload, difficulty: "EASY" }
+  ]) assert.equal((await app.inject({ method: "POST", url, headers, payload: body })).statusCode, 400);
+
+  const response = await app.inject({ method: "POST", url, headers, payload });
+  assert.equal(response.statusCode, 200);
+  assert.equal(receivedGameStarts.at(-1)?.entryAmount, 500n);
+  assert.equal(receivedGameStarts.at(-1)?.selection, "EXACTLY_7");
 });
 
 test("liveness endpoint returns only public health data", async () => {
@@ -267,6 +290,21 @@ test("player deletion preview serializes balances and requires its dedicated per
   assert.equal(allowed.json().counts.ledgerEntries, 5);
 });
 
+test("unsupported request media types remain client errors", async () => {
+  const response = await app.inject({
+    method: "POST",
+    url: "/api/v1/admin/players/5fdb5ce8-a3c9-41f7-bd25-4072f67123e1/deletion-preview",
+    headers: {
+      cookie: `gp_session=${"C".repeat(43)}`,
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    payload: ""
+  });
+
+  assert.equal(response.statusCode, 415);
+  assert.equal(response.json().error.code, "INVALID_REQUEST");
+});
+
 test("record cleanup validates retention days and requires idempotency for deletion", async () => {
   const invalidPreview = await app.inject({
     method: "POST",
@@ -367,7 +405,11 @@ test("wallet adjustments reject a missing idempotency key", async () => {
 test("game catalog is authenticated and resolved by the backend", async () => {
   const response = await app.inject({ method: "GET", url: "/api/v1/games", headers: { cookie: `gp_session=${"A".repeat(43)}` } });
   assert.equal(response.statusCode, 200);
-  assert.deepEqual(response.json(), { games: [] });
+  assert.deepEqual(response.json(), { games: [{
+    ...catalogGame,
+    minimumEntry: "50",
+    maximumEntry: "3000"
+  }] });
 });
 
 test("paid game start requires idempotency and converts entry coins to bigint", async () => {

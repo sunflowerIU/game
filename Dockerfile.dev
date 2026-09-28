@@ -18,6 +18,7 @@ COPY packages/game-core/package.json ./packages/game-core/package.json
 COPY packages/wallet/package.json ./packages/wallet/package.json
 COPY games/neon-reels/package.json ./games/neon-reels/package.json
 COPY games/neon-mines/package.json ./games/neon-mines/package.json
+COPY games/neon-dice/package.json ./games/neon-dice/package.json
 
 RUN pnpm install --frozen-lockfile
 

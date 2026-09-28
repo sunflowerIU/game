@@ -19,6 +19,20 @@ test("Mines persistence is bounded, constrained, cascades with session cleanup, 
   assert.doesNotMatch(migration, /"status" = 'ACTIVE'/u);
 });
 
+test("Neon Dice registers an immutable exact-paytable version and launches disabled", async () => {
+  const migration = await readFile(new URL("../prisma/migrations/20260928000000_neon_dice_foundation/migration.sql", import.meta.url), "utf8");
+  assert.match(migration, /'neon-dice', 'Neon Dice', 'DISABLED', 'SINGLE_PLAYER'/u);
+  assert.match(migration, /'1\.0\.0',\s*1,\s*50,\s*3000/us);
+  assert.match(migration, /"returnBps": 9500/u);
+  assert.match(migration, /"UNDER_7": 22800/u);
+  assert.match(migration, /"EXACTLY_7": 57000/u);
+  assert.match(migration, /"OVER_7": 22800/u);
+  assert.match(migration, /"wagerDenominationsCents": \[50, 100, 200, 500, 1000, 2000, 3000\]/u);
+  assert.match(migration, /"maximumPayoutCents": 20000/u);
+  assert.match(migration, /"activeVersionId" IS NULL/u);
+  assert.doesNotMatch(migration, /"status"\s*=\s*'ACTIVE'/u);
+});
+
 test("identity migration retains database-enforced security invariants", async () => {
   const migration = await readFile(migrationUrl, "utf8");
 

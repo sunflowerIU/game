@@ -60,11 +60,12 @@ export class PlatformAdminService {
     if (input.status === "ACTIVE") {
       const current = (await this.repository.listGames(100)).find((game) => game.id === input.gameId);
       if (current === undefined) throw new PlatformAdminError("GAME_NOT_FOUND", "Game not found");
-      if (current.slug === "neon-mines") {
+      if (current.slug === "neon-mines" || current.slug === "neon-dice") {
         let configuration: Readonly<Record<string, unknown>>;
         try { configuration = this.configurationValidator(current.slug, current.version, current.configuration); }
-        catch { throw new PlatformAdminError("INVALID_REQUEST", "Fix the Mines configuration before enabling the game"); }
-        validateMinesEntryLimits(current.minimumEntry, current.maximumEntry, configuration);
+        catch { throw new PlatformAdminError("INVALID_REQUEST", `Fix the ${current.name} configuration before enabling the game`); }
+        if (current.slug === "neon-mines") validateMinesEntryLimits(current.minimumEntry, current.maximumEntry, configuration);
+        else validateDiceEntryLimits(current.minimumEntry, current.maximumEntry, configuration);
       }
     }
     const game = await this.repository.setGameStatus({ gameId: input.gameId, status: input.status, audit: this.audit(principal, input) });
@@ -82,6 +83,7 @@ export class PlatformAdminService {
     try { configuration = this.configurationValidator(current.slug, current.version, input.configuration); }
     catch { throw new PlatformAdminError("INVALID_REQUEST", "Game configuration is invalid"); }
     if (current.slug === "neon-mines") validateMinesEntryLimits(minimumEntry, maximumEntry, configuration);
+    if (current.slug === "neon-dice") validateDiceEntryLimits(minimumEntry, maximumEntry, configuration);
     const game = await this.repository.createConfigurationRevision({ gameId: input.gameId, minimumEntry, maximumEntry, configuration, audit: this.audit(principal, input) });
     if (game === null) throw new PlatformAdminError("GAME_NOT_FOUND", "Game not found");
     return game;
@@ -116,5 +118,19 @@ function validateMinesEntryLimits(minimum: bigint, maximum: bigint, configuratio
     if (firstPayout > BigInt(configuration.maximumPayoutCents as number)) {
       throw new PlatformAdminError("INVALID_REQUEST", "Payout cap is too low for the offered Mines wagers; lower the maximum entry or raise the cap");
     }
+  }
+}
+
+function validateDiceEntryLimits(minimum: bigint, maximum: bigint, configuration: Readonly<Record<string, unknown>>): void {
+  const denominations = configuration.wagerDenominationsCents as number[];
+  const first = Array.isArray(denominations) ? denominations[0] : undefined;
+  const last = Array.isArray(denominations) ? denominations.at(-1) : undefined;
+  if (first === undefined || last === undefined || minimum !== BigInt(first) || maximum !== BigInt(last)) {
+    throw new PlatformAdminError("INVALID_REQUEST", "Dice entry limits must match the first and last enabled wager; unlimited wagers are not allowed");
+  }
+  const maximumPayout = configuration.maximumPayoutCents;
+  const requiredPayout = BigInt(last) * 57_000n / 10_000n;
+  if (typeof maximumPayout !== "number" || !Number.isSafeInteger(maximumPayout) || BigInt(maximumPayout) < requiredPayout) {
+    throw new PlatformAdminError("INVALID_REQUEST", "Dice payout reserve is too low for the largest enabled wager");
   }
 }
