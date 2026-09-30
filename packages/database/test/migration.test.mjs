@@ -19,6 +19,17 @@ test("Mines persistence is bounded, constrained, cascades with session cleanup, 
   assert.doesNotMatch(migration, /"status" = 'ACTIVE'/u);
 });
 
+test("Mines completion-only revision preserves old sessions and activates fixed rewards", async () => {
+  const migration = await readFile(new URL("../prisma/migrations/20260930000000_neon_mines_completion_only/migration.sql", import.meta.url), "utf8");
+  assert.match(migration, /"completionOnly":true/u);
+  assert.match(migration, /"boardTiles":9/u);
+  assert.match(migration, /"EASY":\{"mines":2,"maximumWagerCents":1000,"rewardMultiplier":2\}/u);
+  assert.match(migration, /"HARD":\{"mines":4,"maximumWagerCents":2000,"rewardMultiplier":4\}/u);
+  assert.doesNotMatch(migration, /EXPERT/u);
+  assert.match(migration, /active\."configurationRevision" \+ 1/u);
+  assert.doesNotMatch(migration, /UPDATE "GameSession"/u);
+});
+
 test("Neon Dice registers an immutable exact-paytable version and launches disabled", async () => {
   const migration = await readFile(new URL("../prisma/migrations/20260928000000_neon_dice_foundation/migration.sql", import.meta.url), "utf8");
   assert.match(migration, /'neon-dice', 'Neon Dice', 'DISABLED', 'SINGLE_PLAYER'/u);

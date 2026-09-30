@@ -28,16 +28,15 @@ test("players cannot inspect platform administration data", async () => {
   assert.throws(() => new PlatformAdminService(new Repository(), valid).listGames(player), (error: unknown) => error instanceof PlatformAdminError && error.code === "ACCESS_DENIED");
 });
 
-const minesConfig = { maximumPayoutCents: 50_000, wagerDenominationsCents: [10, 25, 50, 100, 200, 500, 1_000, 2_000, 5_000], difficulties: {
-  EASY: { mines: 3, maximumWagerCents: 5_000 }, MEDIUM: { mines: 5, maximumWagerCents: 5_000 },
-  HARD: { mines: 10, maximumWagerCents: 2_000 }, EXPERT: { mines: 15, maximumWagerCents: 1_000 }
+const minesConfig = { completionOnly: true, wagerDenominationsCents: [10, 25, 50, 100, 200, 500, 1_000, 2_000, 5_000], difficulties: {
+  EASY: { mines: 2, maximumWagerCents: 1_000, rewardMultiplier: 2 }, MEDIUM: { mines: 3, maximumWagerCents: 2_000, rewardMultiplier: 3 },
+  HARD: { mines: 4, maximumWagerCents: 2_000, rewardMultiplier: 4 }
 } };
-const mines: AdminGameRecord = { ...game, slug: "neon-mines", maximumEntry: 5_000n, configuration: minesConfig };
-const change = { gameId: game.id, minimumEntry: "10", maximumEntry: "5000", configuration: minesConfig, reason: "Adjust payout reserve", ipAddress: "127.0.0.1", userAgent: null };
+const mines: AdminGameRecord = { ...game, slug: "neon-mines", maximumEntry: 2_000n, configuration: minesConfig };
+const change = { gameId: game.id, minimumEntry: "10", maximumEntry: "2000", configuration: minesConfig, reason: "Adjust deposit limits", ipAddress: "127.0.0.1", userAgent: null };
 
-test("Mines limits preserve a playable wager for each difficulty and reject insufficient liability caps", async () => {
-  for (const patch of [{ maximumEntry: "0" }, { minimumEntry: "11" }, { minimumEntry: "2000" },
-    { configuration: { ...minesConfig, maximumPayoutCents: 5_999 } }]) {
+test("Mines limits preserve a playable deposit for each difficulty", async () => {
+  for (const patch of [{ maximumEntry: "0" }, { minimumEntry: "11" }, { minimumEntry: "2000" }]) {
     const repository = new Repository(mines);
     await assert.rejects(new PlatformAdminService(repository, valid).updateConfiguration(admin, { ...change, ...patch }),
       (error: unknown) => error instanceof PlatformAdminError && error.code === "INVALID_REQUEST");
@@ -45,18 +44,22 @@ test("Mines limits preserve a playable wager for each difficulty and reject insu
   }
 });
 
-test("Mines accepts the exact first-payout boundary and a reduced wager/cap revision", async () => {
-  for (const [maximumEntry, maximumPayoutCents] of [["5000", 6_000], ["10", 25]] as const) {
-    const repository = new Repository(mines);
-    await new PlatformAdminService(repository, valid).updateConfiguration(admin, { ...change, maximumEntry, configuration: { ...minesConfig, maximumPayoutCents } });
-    assert.equal(repository.revision?.maximumEntry, BigInt(maximumEntry));
-    assert.equal(repository.revision?.configuration.maximumPayoutCents, maximumPayoutCents);
-    assert.equal(repository.revision?.audit.reason, change.reason);
-  }
+test("Mines accepts an adjustable per-difficulty deposit cap", async () => {
+  const repository = new Repository(mines);
+  const configuration = { ...minesConfig, difficulties: { ...minesConfig.difficulties, EASY: { ...minesConfig.difficulties.EASY, maximumWagerCents: 500 } } };
+  await new PlatformAdminService(repository, valid).updateConfiguration(admin, { ...change, configuration });
+  assert.equal(repository.revision?.configuration, configuration);
+});
+
+test("Mines accepts an adjustable per-difficulty win multiplier", async () => {
+  const repository = new Repository(mines);
+  const configuration = { ...minesConfig, difficulties: { ...minesConfig.difficulties, MEDIUM: { ...minesConfig.difficulties.MEDIUM, rewardMultiplier: 6 } } };
+  await new PlatformAdminService(repository, valid).updateConfiguration(admin, { ...change, configuration });
+  assert.equal((repository.revision?.configuration.difficulties as typeof configuration.difficulties).MEDIUM.rewardMultiplier, 6);
 });
 
 test("Mines activation validates saved limits; maintenance and disable remain available", async () => {
-  const repository = new Repository({ ...mines, configuration: { ...minesConfig, maximumPayoutCents: 25 } });
+  const repository = new Repository({ ...mines, configuration: { ...minesConfig, difficulties: { ...minesConfig.difficulties, EASY: { ...minesConfig.difficulties.EASY, maximumWagerCents: 1 } } } });
   const service = new PlatformAdminService(repository, valid);
   await assert.rejects(service.setGameStatus(admin, { ...change, status: "ACTIVE" }), PlatformAdminError);
   assert.equal(Boolean(repository.status === null), true);

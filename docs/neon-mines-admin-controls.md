@@ -1,29 +1,28 @@
 # Neon Mines — Section 6: admin controls
 
+> Updated 2026-09-30: the dedicated form manages per-difficulty maximum
+> deposits and win multipliers. Defaults are Easy 10 coins and Medium/Hard 20
+> coins, with 2×/3×/4× rewards that require clearing the full 3×3 board.
+
 Open the private admin app, choose Games, then Manage Neon Mines. The game must
 already exist in the database; this section does not apply migrations or enable it.
 
 ## Configuration form
 
 Mines has a dedicated form instead of editable configuration JSON. Set minimum
-and maximum wagers from the supported coin denominations, and the maximum gross
-payout in coins. The form converts coin amounts to integer cents for the API.
+and maximum wagers from the supported coin denominations, each difficulty's
+maximum deposit, and each difficulty's integer win multiplier.
 
-The 25-tile board, 96% RTP, difficulty mine counts and wager ceilings, denomination
-list, and 500× multiplier ceiling stay fixed. The backend rejects changes to these
-rules, unknown configuration fields, and payout caps outside 0.25–500 coins.
+The 9-tile board, 2/3/4 mine counts, and denomination list stay fixed. The backend
+rejects changes to these rules, unknown configuration fields, and win multipliers
+outside 1×–100×.
 
 Additional administrative validation requires:
 
 - Both entry limits are supported denominations; zero/unlimited is prohibited.
 - Minimum does not exceed maximum.
 - Every difficulty retains at least one eligible wager.
-- The payout cap covers the first safe selection of every offered wager.
-
-For example, allowing the full range needs at least a 60-coin payout cap
-(the first Medium safe selection at a 50-coin wager). Restricting all wagers to
-0.10 coins permits the minimum 0.25-coin cap. Later selections still use the
-engine's existing liability stop/automatic cash-out rules.
+- Every win multiplier is a whole number from 1 through 100.
 
 Saving creates an audited immutable configuration revision through the existing
 admin service. It does not enable the game or change settings of active rounds.

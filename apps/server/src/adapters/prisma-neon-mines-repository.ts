@@ -26,13 +26,13 @@ export class PrismaNeonMinesRepository {
       }
       const game = await tx.game.findFirst({ where: { id: input.gameId, slug: "neon-mines", status: "ACTIVE" }, include: { activeVersion: true } });
       if (!game?.activeVersion || game.activeVersion.version !== "1.0.0") throw new NeonMinesError("GAME_NOT_AVAILABLE", "Game is not available");
-      try { validateDifficultyWager(input.difficulty, input.entryAmount); } catch { throw new NeonMinesError("INVALID_ENTRY", "Choose an available wager for this difficulty"); }
+      const engineConfiguration = configuration(game.activeVersion.configuration);
+      try { validateDifficultyWager(input.difficulty, input.entryAmount, engineConfiguration.difficulties[input.difficulty].maximumWagerCents); } catch { throw new NeonMinesError("INVALID_ENTRY", "Choose an available wager for this difficulty"); }
       if (input.entryAmount < game.activeVersion.minimumEntry || input.entryAmount > game.activeVersion.maximumEntry) throw new NeonMinesError("INVALID_ENTRY", "Wager is outside the configured range");
       const active = await tx.gameSession.findFirst({ where: { ownerAccountId: input.playerId, status: { in: ["CREATED", "ACTIVE"] } } });
       if (active) throw new NeonMinesError("SESSION_ALREADY_ACTIVE", "Resume the active round before starting another");
       if (wallet.balance < input.entryAmount) throw new NeonMinesError("INSUFFICIENT_BALANCE", "Wallet has insufficient balance");
-      const engine = new NeonMinesEngine(input.entryAmount, input.difficulty, configuration(game.activeVersion.configuration), this.random);
-      if (!engine.getPublicState().nextSelectionAllowed) throw new NeonMinesError("INVALID_ENTRY", "Wager exceeds the configured payout limit");
+      const engine = new NeonMinesEngine(input.entryAmount, input.difficulty, engineConfiguration, this.random);
       const now = this.clock();
       const session = await tx.gameSession.create({ data: {
         ownerAccountId: input.playerId, gameId: game.id, gameVersionId: game.activeVersion.id, gameVersion: game.activeVersion.version,
@@ -112,11 +112,12 @@ export class PrismaNeonMinesRepository {
       const reward = BigInt(snapshot.reward);
       if (reward > 0n) {
         const balance = wallet.balance + reward;
+        const refunded = snapshot.status === "ABANDONED";
         await tx.wallet.update({ where: { id: wallet.id }, data: { balance, version: { increment: 1 } } });
         await tx.ledgerEntry.create({ data: {
-          walletId: wallet.id, type: "GAME_REWARD", amount: reward, balanceBefore: wallet.balance, balanceAfter: balance,
+          walletId: wallet.id, type: refunded ? "REFUND" : "GAME_REWARD", amount: reward, balanceBefore: wallet.balance, balanceAfter: balance,
           referenceType: "GAME_SESSION", referenceId: session.id, idempotencyKey: `game-settle:${session.id}`,
-          createdByType: "GAME", metadata: { gameSlug: "neon-mines", outcome: snapshot.status }
+          createdByType: "GAME", metadata: { gameSlug: "neon-mines", outcome: snapshot.status, refunded }
         } });
       }
       await tx.gameResult.create({ data: { gameSessionId: session.id, outcome: snapshot.status === "ABANDONED" ? "ABANDONED" : "COMPLETED", score: engine.getPublicState().safeSelections, reward, details: json(snapshot) } });

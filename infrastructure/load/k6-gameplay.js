@@ -59,12 +59,12 @@ export default function () {
   });
   if (gameSlug === "neon-mines" && spin.status === 200) {
     const sessionId = spin.json("session.id");
-    const selected = http.post(`${origin}/api/v1/game-sessions/${sessionId}/commands`, JSON.stringify({ commandId: commandId(1), sequence: 1, payload: { action: "SELECT_TILE", tile: (__VU + __ITER) % 25 } }), {
+      const selected = http.post(`${origin}/api/v1/game-sessions/${sessionId}/commands`, JSON.stringify({ commandId: commandId(1), sequence: 1, payload: { action: "SELECT_TILE", tile: (__VU + __ITER) % 9 } }), {
       headers: { "content-type": "application/json" }, tags: { name: "game-action" }
     });
     check(selected, { "Mines selection succeeds": (response) => response.status === 200 });
     if (selected.status === 200 && selected.json("session.status") === "ACTIVE") {
-      const cashed = http.post(`${origin}/api/v1/game-sessions/${sessionId}/commands`, JSON.stringify({ commandId: commandId(2), sequence: 2, payload: { action: "CASH_OUT" } }), {
+      const cashed = http.post(`${origin}/api/v1/game-sessions/${sessionId}/commands`, JSON.stringify({ commandId: commandId(2), sequence: 2, payload: { action: "LEAVE" } }), {
         headers: { "content-type": "application/json" }, tags: { name: "game-action" }
       });
       check(cashed, { "Mines cash-out completes": (response) => response.status === 200 && response.json("session.status") === "COMPLETED" });

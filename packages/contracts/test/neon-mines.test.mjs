@@ -5,7 +5,7 @@ import { NeonMinesRequestError, parseNeonMinesAction, parseNeonMinesCommandReque
 const commandId = "2c84e3d5-4ba7-49ec-9c57-70ea25f30131";
 
 test("Mines start contract accepts integer cents and each named difficulty", () => {
-  for (const difficulty of ["EASY", "MEDIUM", "HARD", "EXPERT"]) {
+  for (const difficulty of ["EASY", "MEDIUM", "HARD"]) {
     assert.deepEqual(parseStartNeonMinesSessionRequest({ entryAmount: 100, difficulty }), { entryAmount: 100, difficulty });
   }
 });
@@ -21,17 +21,17 @@ test("Mines start contract rejects client-provided boards, rewards, coercion, an
 });
 
 test("Mines commands are canonical, strictly shaped, and sequence bounded", () => {
-  const command = { commandId, sequence: 1, payload: { action: "SELECT_TILE", tile: 24 } };
+  const command = { commandId, sequence: 1, payload: { action: "SELECT_TILE", tile: 8 } };
   assert.deepEqual(parseNeonMinesCommandRequest({ ...command, commandId: commandId.toUpperCase() }), command);
-  assert.deepEqual(parseNeonMinesAction({ action: "CASH_OUT" }), { action: "CASH_OUT" });
+  assert.deepEqual(parseNeonMinesAction({ action: "LEAVE" }), { action: "LEAVE" });
   for (const raw of [{ ...command, sequence: 0 }, { ...command, sequence: 1.5 },
     { ...command, sequence: "1" }, { ...command, sequence: 2_147_483_647 },
     { ...command, commandId: "invalid" }, { ...command, reward: "999" },
     { ...command, payload: { action: "SELECT_TILE", tile: -1 } },
-    { ...command, payload: { action: "SELECT_TILE", tile: 25 } },
+    { ...command, payload: { action: "SELECT_TILE", tile: 9 } },
     { ...command, payload: { action: "SELECT_TILE", tile: "1" } },
-    { ...command, payload: { action: "CASH_OUT", tile: 1 } },
-    { ...command, payload: { action: "CASH_OUT", reward: 100 } }]) {
+    { ...command, payload: { action: "LEAVE", tile: 1 } },
+    { ...command, payload: { action: "LEAVE", reward: 100 } }]) {
     assert.throws(() => parseNeonMinesCommandRequest(raw), NeonMinesRequestError);
   }
 });
