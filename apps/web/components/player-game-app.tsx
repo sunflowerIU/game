@@ -174,7 +174,7 @@ export function PlayerGameApp() {
       if (selectedGame.slug === "neon-reels") {
         await delay(SPIN_ANIMATION_MILLISECONDS);
         const result = session.publicState as SlotState;
-        window.setTimeout(() => playSound(result.outcome === "WIN" ? "reel-win" : "reel-lose"), 1_250);
+        playSound(result.outcome === "WIN" ? "reel-win" : "reel-lose");
       }
     } catch (caught: unknown) {
       if (selectedGame.slug === "neon-mines") await loadPlayer().catch(() => undefined);
@@ -193,7 +193,7 @@ export function PlayerGameApp() {
       setActive(session);
       await Promise.all([refreshBalance(), animationWindow]);
       const result = session.publicState as SlotState;
-      window.setTimeout(() => playSound(result.outcome === "WIN" ? "reel-win" : "reel-lose"), 1_250);
+      playSound(result.outcome === "WIN" ? "reel-win" : "reel-lose");
       return true;
     } catch (caught: unknown) { await refreshBalance().catch(() => undefined); showToast(errorText(caught), "error"); return false; }
     finally { setPending(false); }
