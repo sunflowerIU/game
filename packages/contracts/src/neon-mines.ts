@@ -1,8 +1,8 @@
 import type { GameSessionSummary } from "./index.js";
 
-export type NeonMinesDifficulty = "EASY" | "MEDIUM" | "HARD" | "EXPERT";
-export type NeonMinesRoundStatus = "ACTIVE" | "CASHED_OUT" | "MINE_HIT" | "AUTO_CASHED_OUT" | "ABANDONED";
-export type NeonMinesAction = { readonly action: "SELECT_TILE"; readonly tile: number } | { readonly action: "CASH_OUT" };
+export type NeonMinesDifficulty = "EASY" | "MEDIUM" | "HARD";
+export type NeonMinesRoundStatus = "ACTIVE" | "WON" | "MINE_HIT" | "ABANDONED";
+export type NeonMinesAction = { readonly action: "SELECT_TILE"; readonly tile: number } | { readonly action: "LEAVE" };
 
 export interface StartNeonMinesSessionRequest {
   /** Integer cents, not display coins. Denominations and difficulty limits are checked by the game. */
@@ -18,7 +18,7 @@ export interface NeonMinesCommandRequest {
 
 export interface NeonMinesPublicState {
   readonly status: NeonMinesRoundStatus;
-  readonly boardTiles: 25;
+  readonly boardTiles: 9;
   readonly difficulty: NeonMinesDifficulty;
   readonly mineCount: number;
   readonly entryAmount: string;
@@ -26,6 +26,7 @@ export interface NeonMinesPublicState {
   readonly revealedMines: readonly number[];
   readonly detonatedTile: number | null;
   readonly safeSelections: number;
+  readonly rewardMultiplier: number;
   readonly currentCashOut: string;
   readonly nextSafePayout: string | null;
   readonly cashOutAvailable: boolean;
@@ -58,19 +59,19 @@ export function parseStartNeonMinesSessionRequest(raw: unknown): StartNeonMinesS
   if (!Number.isSafeInteger(value.entryAmount) || (value.entryAmount as number) < 1 || (value.entryAmount as number) > 1_000_000_000) {
     throw new NeonMinesRequestError("Wager must be a positive integer amount in cents");
   }
-  if (value.difficulty !== "EASY" && value.difficulty !== "MEDIUM" && value.difficulty !== "HARD" && value.difficulty !== "EXPERT") {
+  if (value.difficulty !== "EASY" && value.difficulty !== "MEDIUM" && value.difficulty !== "HARD") {
     throw new NeonMinesRequestError("Invalid Neon Mines difficulty");
   }
   return { entryAmount: value.entryAmount as number, difficulty: value.difficulty };
 }
 
 export function parseNeonMinesAction(raw: unknown): NeonMinesAction {
-  const fields = typeof raw === "object" && raw !== null && "action" in raw && raw.action === "CASH_OUT" ? ["action"] : ["action", "tile"];
+  const fields = typeof raw === "object" && raw !== null && "action" in raw && raw.action === "LEAVE" ? ["action"] : ["action", "tile"];
   const value = exactObject(raw, fields);
-  if (value.action === "CASH_OUT") return { action: "CASH_OUT" };
+  if (value.action === "LEAVE") return { action: "LEAVE" };
   if (value.action !== "SELECT_TILE") throw new NeonMinesRequestError("Invalid Neon Mines input");
-  if (!Number.isSafeInteger(value.tile) || (value.tile as number) < 0 || (value.tile as number) > 24) {
-    throw new NeonMinesRequestError("Tile must be a whole number from 0 through 24");
+  if (!Number.isSafeInteger(value.tile) || (value.tile as number) < 0 || (value.tile as number) > 8) {
+    throw new NeonMinesRequestError("Tile must be a whole number from 0 through 8");
   }
   return { action: "SELECT_TILE", tile: value.tile as number };
 }

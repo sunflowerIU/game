@@ -36,12 +36,12 @@ test("backup tooling validates dumps, checksums them, and performs isolated rest
   assert.match(verify, /dropdb --if-exists/u);
 });
 
-test("paid load profile covers authoritative Neon Mines start, selection and cash-out", async () => {
+test("paid load profile covers authoritative Neon Mines start, selection and leave settlement", async () => {
   const load = await read("infrastructure/load/k6-gameplay.js");
   assert.match(load, /GAME_SLUG.*neon-reels/u);
   assert.match(load, /gameSlug === "neon-mines"/u);
   assert.match(load, /SELECT_TILE/u);
-  assert.match(load, /CASH_OUT/u);
+  assert.match(load, /LEAVE/u);
   assert.match(load, /PLAYER_USERNAME_PREFIX/u);
   assert.match(load, /noCookiesReset:\s*true/u);
   assert.match(load, /summaryTrendStats:[\s\S]*p\(99\)/u);

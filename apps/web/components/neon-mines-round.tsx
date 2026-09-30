@@ -10,7 +10,7 @@ export function NeonMinesRound({ state, expiresAt, pending, needsSync, onReconne
   pending: boolean;
   needsSync: boolean;
   onReconnect: () => void;
-  onAction: (action: NeonMinesAction) => Promise<void>;
+  onAction: (action: NeonMinesAction) => Promise<unknown>;
   onRestart: () => void;
 }>) {
   const active = state.status === "ACTIVE";
@@ -26,19 +26,19 @@ export function NeonMinesRound({ state, expiresAt, pending, needsSync, onReconne
   const selected = new Set(state.selectedTiles);
   const mines = new Set(state.revealedMines);
   const headline = state.status === "MINE_HIT" ? "Game over"
-    : state.status === "ABANDONED" ? "Round expired"
-      : state.status === "CASHED_OUT" || state.status === "AUTO_CASHED_OUT" ? "Coins secured" : "Choose a tile";
+    : state.status === "ABANDONED" ? "Round ended"
+      : state.status === "WON" ? "Board cleared!" : "Choose a tile";
 
   return <section className={`mines-stage mines-status-${state.status.toLowerCase()}`} aria-label="Neon Mines game board">
     <div className="mines-summary">
-      <div><small>CASH OUT</small><strong>{formatCents(state.currentCashOut)}</strong></div>
-      <div><small>NEXT SAFE</small><strong>{state.nextSafePayout === null ? "—" : formatCents(state.nextSafePayout)}</strong></div>
+      <div><small>DEPOSIT</small><strong>{formatCents(state.entryAmount)}</strong></div>
+      <div><small>WIN REWARD</small><strong>{state.rewardMultiplier}×</strong></div>
       <div><small>SAFE PICKS</small><strong>{state.safeSelections}</strong></div>
       <div><small>{active ? "ROUND TIME" : "RESULT"}</small><strong>{active ? formatTimer(remaining) : statusLabel(state.status)}</strong></div>
     </div>
 
     <div className="mines-board-wrap">
-      <div className="mines-board" role="group" aria-label={`25 tiles with ${state.mineCount} mines`}>
+      <div className="mines-board" role="group" aria-label={`${state.boardTiles} tiles with ${state.mineCount} mines`}>
         {Array.from({ length: state.boardTiles }, (_, tile) => {
           const mine = mines.has(tile); const chosen = selected.has(tile); const detonated = state.detonatedTile === tile;
           const className = detonated ? "mine-tile mine-tile-hit" : mine ? "mine-tile mine-tile-mine" : chosen ? "mine-tile mine-tile-safe" : "mine-tile";
@@ -49,12 +49,12 @@ export function NeonMinesRound({ state, expiresAt, pending, needsSync, onReconne
         })}
       </div>
     </div>
-    <div className="mines-message" aria-live="polite"><i aria-hidden="true" /> <strong>{pending ? "Checking action…" : needsSync ? "Connection interrupted" : headline}</strong><span>{needsSync ? "Reconnect before your next move" : active ? `${state.mineCount} mines remain hidden` : terminalText(state)}</span></div>
+    <div className="mines-message" aria-live="polite"><i aria-hidden="true" /> <strong>{pending ? "Checking action…" : needsSync ? "Connection interrupted" : headline}</strong><span>{needsSync ? "Reconnect before your next move" : active ? `Clear all ${state.boardTiles - state.mineCount} safe tiles to win ${formatCents(state.nextSafePayout ?? "0")}` : terminalText(state)}</span></div>
 
     <div className="mines-controls">
-      {needsSync ? <button className="mines-done" disabled={pending} onClick={onReconnect}>{pending ? "RECONNECTING…" : "RECONNECT"}</button> : active ? <button className="mines-cashout" disabled={pending || !state.cashOutAvailable} onClick={() => void onAction({ action: "CASH_OUT" })}>
-        <span>{pending ? "PLEASE WAIT" : state.cashOutAvailable ? "CASH OUT" : "PICK A SAFE TILE"}</span>
-        <strong>{state.cashOutAvailable ? `${formatCents(state.currentCashOut)} COINS` : `BET ${formatCents(state.entryAmount)}`}</strong>
+      {needsSync ? <button className="mines-done" disabled={pending} onClick={onReconnect}>{pending ? "RECONNECTING…" : "RECONNECT"}</button> : active ? <button className="mines-cashout" disabled>
+        <span>COMPLETE THE BOARD TO WIN</span>
+        <strong>{state.rewardMultiplier}× = {formatCents(state.nextSafePayout ?? "0")} COINS</strong>
       </button> : <button className="mines-done" disabled={pending} onClick={onRestart}>{pending ? "STARTING…" : "PLAY AGAIN"}</button>}
     </div>
   </section>;
@@ -65,6 +65,6 @@ function formatTimer(seconds: number | null): string { if (seconds === null) ret
 function statusLabel(status: NeonMinesPublicState["status"]): string { return status === "MINE_HIT" ? "LOST" : status === "ABANDONED" ? "EXPIRED" : "WON"; }
 function terminalText(state: NeonMinesPublicState): string {
   if (state.status === "MINE_HIT") return "The wager was lost";
-  if (state.status === "ABANDONED") return "No tile was selected";
-  return `${formatCents(state.currentCashOut)} coins returned`;
+  if (state.status === "ABANDONED") return BigInt(state.currentCashOut) > 0n ? "Deposit refunded because no tile was selected" : "Round left after a tile was selected; deposit forfeited";
+  return `${formatCents(state.currentCashOut)} coins awarded`;
 }

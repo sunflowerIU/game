@@ -64,13 +64,13 @@ try {
     where: { gameId_version_configurationRevision: { gameId: neonMines.id, version: "1.0.0", configurationRevision: 1 } },
     update: {},
     create: {
-      gameId: neonMines.id, version: "1.0.0", minimumEntry: 10n, maximumEntry: 5_000n,
+      gameId: neonMines.id, version: "1.0.0", minimumEntry: 10n, maximumEntry: 2_000n,
       configuration: {
-        boardTiles: 25, returnBps: 9_600, maximumMultiplierBps: 5_000_000, maximumPayoutCents: 50_000,
+        boardTiles: 9, completionOnly: true,
         wagerDenominationsCents: [10, 25, 50, 100, 200, 500, 1_000, 2_000, 5_000],
         difficulties: {
-          EASY: { mines: 3, maximumWagerCents: 5_000 }, MEDIUM: { mines: 5, maximumWagerCents: 5_000 },
-          HARD: { mines: 10, maximumWagerCents: 2_000 }, EXPERT: { mines: 15, maximumWagerCents: 1_000 }
+          EASY: { mines: 2, maximumWagerCents: 1_000, rewardMultiplier: 2 }, MEDIUM: { mines: 3, maximumWagerCents: 2_000, rewardMultiplier: 3 },
+          HARD: { mines: 4, maximumWagerCents: 2_000, rewardMultiplier: 4 }
         }
       }
     }

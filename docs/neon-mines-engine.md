@@ -1,5 +1,10 @@
 # Neon Mines engine and round lifecycle
 
+> Updated 2026-09-30: Neon Mines is completion-only. Progressive and automatic
+> cash-out behavior described in older sections below has been replaced by fixed
+> 2×/3×/4× rewards after every safe tile is revealed on the 3×3 board. Leaving before the first
+> tile refunds the deposit; leaving after a selection forfeits it.
+
 This document fixes the Section 2 in-memory game behavior. Persistence, HTTP APIs, wallet settlement, and the player interface belong to later sections.
 
 ## Round lifecycle
@@ -9,19 +14,18 @@ Every round starts in `ACTIVE` with a server-generated mine layout. The layout i
 | Trigger | Resulting status | Reward |
 |---|---|---:|
 | Player selects a safe tile | `ACTIVE` | Not settled |
-| Player cashes out after at least one safe tile | `CASHED_OUT` | Current exact payout |
 | Player selects a mine | `MINE_HIT` | 0 |
-| Next safe selection would breach a payout limit | `AUTO_CASHED_OUT` | Current exact payout |
-| Server completes a progressed round | `AUTO_CASHED_OUT` | Current exact payout |
-| Server completes an untouched round | `ABANDONED` | 0 |
+| Player reveals every safe tile | `WON` | Configured difficulty multiplier × deposit |
+| Player/server ends a progressed round | `ABANDONED` | 0 |
+| Player/server ends an untouched round | `ABANDONED` | Deposit refunded |
 
 Terminal rounds reject further player input. An abandoned round is distinct from a mine loss so reporting does not falsely claim that the player selected a mine.
 
 ## Accepted player actions
 
-- `SELECT_TILE` accepts exactly one integer tile index from 0 through 24.
+- `SELECT_TILE` accepts exactly one integer tile index from 0 through 8.
 - A tile cannot be selected twice.
-- `CASH_OUT` is available only after at least one safe selection.
+- `LEAVE` refunds an untouched round and forfeits a progressed round.
 - Unknown fields, malformed actions, and actions after completion are rejected.
 
 ## Information boundaries
@@ -30,9 +34,9 @@ The public state contains the selected tiles, payout offers, status, and game co
 
 The authoritative result contains the mine layout and settlement data for trusted server code. It must not be returned directly to a player client.
 
-## Payout and liability behavior
+## Payout behavior
 
-The engine calls the Section 1 exact-integer payout functions. A safe selection updates the available cash-out. If another successful selection would exceed the configured 500-coin or 500x ceiling, the engine automatically cashes out at the current fair value before accepting that extra risk. A mine always changes the displayed and settled cash-out to zero, including when safe tiles were selected earlier.
+Easy, Medium, and Hard use 2, 3, and 4 mines respectively. Their default full-board rewards remain 2×, 3×, and 4× the deposit. Administrators may change each integer multiplier from 1× through 100×; the server validates and snapshots the configuration revision used by the round. A mine always settles zero.
 
 ## Randomness and recovery
 

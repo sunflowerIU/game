@@ -1,16 +1,21 @@
 # Neon Mines — Section 5: player interface
 
-The player app now routes Neon Mines rounds to a dedicated 25-tile board. Neon
+> Updated 2026-09-30: the player interface no longer offers cash-out. It shows
+> the full-board reward, settles a win only after every safe tile is selected,
+> and warns that leaving after the first selection forfeits the deposit. Leaving
+> before selecting a tile refunds the deposit.
+
+The player app now routes Neon Mines rounds to a dedicated 3×3 board. Neon
 Reels retains its existing screen. The existing mobile-only policy is unchanged.
 
 ## Player flow
 
 1. Select Neon Mines in the enabled-game catalog, choose difficulty and wager.
-   Easy/Medium/Hard/Expert show 3/5/10/15 mines and filter wagers by the launch
+   Easy/Medium/Hard show 2/3/4 mines and filter wagers by the configured
    limits. The server independently validates every start.
-2. The server charges the entry once. The board displays server-provided cash-out
-   and next-safe amounts; these are gross returns, including the wager.
-3. Select a tile or cash out after a safe selection. Pending actions disable the
+2. The server charges the entry once. The board displays the server-provided
+   full-board win amount, including the wager.
+3. Select tiles until every safe tile is revealed. Pending actions disable the
    board. Results reveal safe selections and, on loss, mines returned by the server.
 4. A completed round keeps the player in Neon Mines, refreshes the wallet, and offers Play Again with the same wager and difficulty. The header back control remains available. Active rounds
    are recovered at login/reload, including when a game has entered maintenance.
@@ -23,7 +28,7 @@ the authoritative state, while server expiry runs independently.
 
 ## Network and balance behavior
 
-- Synchronous in-flight guards prevent duplicate starts and tile/cash-out taps.
+- Synchronous in-flight guards prevent duplicate starts and tile taps.
 - An uncertain Mines start retains its idempotency key for the same wager and
   difficulty within the mounted app, and attempts active-session recovery.
 - A failed command attempts resume before another move. If recovery also fails,

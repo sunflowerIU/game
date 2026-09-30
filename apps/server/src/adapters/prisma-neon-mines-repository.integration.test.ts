@@ -16,7 +16,7 @@ test("Mines durable transactions, recovery, and retry invariants", { skip: url =
     return db.account.create({ data: { username: name, usernameNormalized: name, type: "PLAYER", credential: { create: { passwordHash: "$argon2id$test" } }, playerProfile: { create: {} }, wallet: { create: { balance } } } });
   }
   function startInput(playerId: string) { return { playerId, gameId: game.id, entryAmount: 100n, difficulty: "EASY" as const, idempotencyKey: crypto.randomUUID() }; }
-  function command(sequence: number, tile?: number) { return { commandId: crypto.randomUUID(), sequence, payload: tile === undefined ? { action: "CASH_OUT" as const } : { action: "SELECT_TILE" as const, tile } }; }
+  function command(sequence: number, tile?: number) { return { commandId: crypto.randomUUID(), sequence, payload: tile === undefined ? { action: "LEAVE" as const } : { action: "SELECT_TILE" as const, tile } }; }
   const errorCode = (code: string) => (error: unknown) => error instanceof NeonMinesError && error.code === code;
   try {
     await t.test("disabled launch, denomination checks, and parallel start idempotency", async () => {
@@ -38,20 +38,21 @@ test("Mines durable transactions, recovery, and retry invariants", { skip: url =
       assert.equal(await db.gameSession.count({ where: { ownerAccountId: poor.id } }), 0);
     });
 
-    await t.test("cash-out retries settle once and cannot repeat a reward", async () => {
+    await t.test("a completed board rewards once and the final command is idempotent", async () => {
       const owner = await player(); const round = await repo.start(startInput(owner.id));
       const safe = command(1, 3);
       await repo.command(owner.id, round.session.id, safe);
       assert.equal((await new PrismaNeonMinesRepository(db).resume(owner.id))!.nextSequence, 2);
       await assert.rejects(repo.command(owner.id, round.session.id, { ...safe, payload: { action: "SELECT_TILE", tile: 4 } }), errorCode("IDEMPOTENCY_CONFLICT"));
-      const cash = command(2);
-      const results = await Promise.all([repo.command(owner.id, round.session.id, cash), repo.command(owner.id, round.session.id, cash)]);
+      for (let tile = 4; tile < 24; tile += 1) await repo.command(owner.id, round.session.id, command(tile - 2, tile));
+      const final = command(22, 24);
+      const results = await Promise.all([repo.command(owner.id, round.session.id, final), repo.command(owner.id, round.session.id, final)]);
       assert.equal(results.filter((r) => r.replayed).length, 1);
-      assert.equal(results[0]!.session.reward, 109n);
-      assert.equal((await db.wallet.findUniqueOrThrow({ where: { accountId: owner.id } })).balance, 1009n);
+      assert.equal(results[0]!.session.reward, 200n);
+      assert.equal((await db.wallet.findUniqueOrThrow({ where: { accountId: owner.id } })).balance, 1100n);
       assert.equal(await db.gameResult.count({ where: { gameSessionId: round.session.id } }), 1);
       assert.equal(await db.ledgerEntry.count({ where: { referenceId: round.session.id, type: "GAME_REWARD" } }), 1);
-      await assert.rejects(repo.command(owner.id, round.session.id, command(3, 4)), errorCode("SESSION_COMPLETE"));
+      await assert.rejects(repo.command(owner.id, round.session.id, command(23, 4)), errorCode("SESSION_COMPLETE"));
     });
 
     await t.test("competing sequence numbers accept only one action and keep one snapshot", async () => {
@@ -92,19 +93,20 @@ test("Mines durable transactions, recovery, and retry invariants", { skip: url =
         await db.$executeRawUnsafe(`DROP TRIGGER mines_test_fail_result ON "GameResult"`);
         await db.$executeRawUnsafe(`DROP FUNCTION mines_test_fail_result()`);
       }
-      assert.equal((await repo.command(owner.id, round.session.id, cash)).session.reward, 109n);
+      assert.equal((await repo.command(owner.id, round.session.id, cash)).session.reward, 0n);
     });
 
     await t.test("in-flight rounds retain original terms when the game is put in maintenance", async () => {
       const owner = await player(); const input = startInput(owner.id); const round = await repo.start(input);
       const original = await db.gameVersion.findUniqueOrThrow({ where: { id: game.activeVersionId! } });
-      const revision = await db.gameVersion.create({ data: { gameId: game.id, version: "1.0.0", configurationRevision: 99, minimumEntry: 10n, maximumEntry: 500n, configuration: { ...(original.configuration as object), maximumPayoutCents: 110 } } });
+      const originalConfiguration = original.configuration as { difficulties: Record<string, object> };
+      const revision = await db.gameVersion.create({ data: { gameId: game.id, version: "1.0.0", configurationRevision: 99, minimumEntry: 10n, maximumEntry: 500n, configuration: { ...originalConfiguration, difficulties: { ...originalConfiguration.difficulties, EASY: { ...(originalConfiguration.difficulties.EASY as object), maximumWagerCents: 500 } } } } });
       await db.game.update({ where: { id: game.id }, data: { status: "MAINTENANCE", activeVersionId: revision.id } });
       try {
         assert.equal((await repo.start(input)).replayed, true);
         const safe = await repo.command(owner.id, round.session.id, command(1, 3));
-        assert.equal(safe.publicState.status, "ACTIVE", "Original cap still applies, so first safe tile must not auto-cash-out");
-        assert.equal((await repo.command(owner.id, round.session.id, command(2))).session.reward, 109n);
+        assert.equal(safe.publicState.status, "ACTIVE", "The original immutable settings remain attached to the round");
+        assert.equal((await repo.command(owner.id, round.session.id, command(2))).session.reward, 0n);
       } finally { await db.game.update({ where: { id: game.id }, data: { status: "ACTIVE", activeVersionId: original.id } }); }
     });
 
@@ -117,10 +119,10 @@ test("Mines durable transactions, recovery, and retry invariants", { skip: url =
         repo.command(owner.id, round.session.id, command(2)),
         new PrismaWalletRepository(db).applyAdminAdjustment({ playerId: owner.id, adminId: admin.id, signedAmount: 500n, type: "ADMIN_DEPOSIT", idempotencyKey: crypto.randomUUID(), reason: "Mines concurrency test", ipAddress: "127.0.0.1", userAgent: "test", occurredAt: new Date() })
       ]);
-      assert.equal((await db.wallet.findUniqueOrThrow({ where: { accountId: owner.id } })).balance, 1509n);
+      assert.equal((await db.wallet.findUniqueOrThrow({ where: { accountId: owner.id } })).balance, 1400n);
     });
 
-    await t.test("expiry pays safe progress for disabled players and abandons untouched rounds", async () => {
+    await t.test("expiry forfeits safe progress but refunds untouched rounds", async () => {
       const owner = await player(); const untouched = await player();
       const round = await repo.start(startInput(owner.id)); const empty = await repo.start(startInput(untouched.id));
       const safe = command(1, 3); await repo.command(owner.id, round.session.id, safe);
@@ -128,10 +130,11 @@ test("Mines durable transactions, recovery, and retry invariants", { skip: url =
       await assert.rejects(repo.resume(owner.id), errorCode("ACCESS_DENIED"));
       const future = new PrismaNeonMinesRepository(db, () => new Date(Date.now() + 16 * 60 * 1000));
       await future.expireBatch();
-      assert.equal((await db.gameResult.findUniqueOrThrow({ where: { gameSessionId: round.session.id } })).reward, 109n);
+      assert.equal((await db.gameResult.findUniqueOrThrow({ where: { gameSessionId: round.session.id } })).reward, 0n);
+      assert.equal((await db.gameResult.findUniqueOrThrow({ where: { gameSessionId: empty.session.id } })).reward, 100n);
       assert.equal((await db.gameSession.findUniqueOrThrow({ where: { id: empty.session.id } })).status, "ABANDONED");
       await future.expireBatch();
-      assert.equal(await db.ledgerEntry.count({ where: { referenceId: round.session.id, type: "GAME_REWARD" } }), 1);
+      assert.equal(await db.ledgerEntry.count({ where: { referenceId: empty.session.id, type: "REFUND" } }), 1);
     });
 
     await t.test("concurrent expiry, cash-out and start replay settle the same round only once", async () => {
@@ -143,9 +146,9 @@ test("Mines durable transactions, recovery, and retry invariants", { skip: url =
       ]);
       assert.equal(results[0]!.status, "fulfilled");
       assert.equal(results[2]!.status, "fulfilled");
-      assert.equal((await db.wallet.findUniqueOrThrow({ where: { accountId: owner.id } })).balance, 1009n);
+      assert.equal((await db.wallet.findUniqueOrThrow({ where: { accountId: owner.id } })).balance, 900n);
       assert.equal(await db.gameResult.count({ where: { gameSessionId: round.session.id } }), 1);
-      assert.equal(await db.ledgerEntry.count({ where: { referenceId: round.session.id, type: "GAME_REWARD" } }), 1);
+      assert.equal(await db.ledgerEntry.count({ where: { referenceId: round.session.id, type: "GAME_REWARD" } }), 0);
       assert.equal((await db.gameSessionState.findUniqueOrThrow({ where: { gameSessionId: round.session.id } })).expiresAt, null);
     });
 
@@ -154,10 +157,10 @@ test("Mines durable transactions, recovery, and retry invariants", { skip: url =
       const safe = command(1, 3); await repo.command(owner.id, round.session.id, safe);
       const future = new PrismaNeonMinesRepository(db, () => new Date(Date.now() + 16 * 60 * 1000));
       await assert.rejects(future.command(owner.id, round.session.id, command(2, 0)), errorCode("SESSION_COMPLETE"));
-      assert.equal((await db.gameResult.findUniqueOrThrow({ where: { gameSessionId: round.session.id } })).reward, 109n);
+      assert.equal((await db.gameResult.findUniqueOrThrow({ where: { gameSessionId: round.session.id } })).reward, 0n);
       const replay = await future.command(owner.id, round.session.id, safe);
       assert.equal(replay.replayed, true);
-      assert.equal(replay.publicState.status, "AUTO_CASHED_OUT");
+      assert.equal(replay.publicState.status, "ABANDONED");
     });
   } finally { await db.$disconnect(); }
 });

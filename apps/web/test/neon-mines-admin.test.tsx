@@ -3,22 +3,26 @@ import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import { NeonMinesAdminFields, minesConfigurationFromForm } from "../components/neon-mines-admin-fields";
 
-test("Mines admin exposes coin limits, fixed odds and round revision policy", () => {
-  const html = renderToStaticMarkup(<NeonMinesAdminFields configuration={{ maximumPayoutCents: 50_000 }} minimumEntry="10" maximumEntry="5000" />);
-  assert.match(html, /96% theoretical RTP/);
+test("Mines admin exposes completion rewards and adjustable deposit caps", () => {
+  const html = renderToStaticMarkup(<NeonMinesAdminFields configuration={{}} minimumEntry="10" maximumEntry="2000" />);
+  assert.match(html, /Completion-only rewards/);
   assert.match(html, /active rounds retain their original settings/);
-  assert.match(html, /name="maximumPayout"/);
-  assert.match(html, /value="500.00"/);
-  assert.match(html, /50 coin max/);
-  assert.match(html, /value="50.00" selected/);
+  assert.match(html, /name="easyMaximum"/);
+  assert.match(html, /name="easyReward"/);
+  assert.doesNotMatch(html, /expert/i);
+  assert.match(html, /Easy: 2 mines \/ 2×/);
+  assert.match(html, /value="10.00" selected/);
   assert.doesNotMatch(html, /textarea|unlimited/i);
 });
 
-test("Mines admin translates coins to cents without replacing fixed rules", () => {
-  const config = { boardTiles: 25, returnBps: 9600, maximumPayoutCents: 50_000 };
-  const form = new FormData(); form.set("maximumPayout", "12.34");
-  assert.deepEqual(minesConfigurationFromForm(config, form), { ...config, maximumPayoutCents: 1234 });
-  assert.equal(config.maximumPayoutCents, 50_000);
-  form.set("maximumPayout", "invalid");
+test("Mines admin translates each difficulty cap to cents", () => {
+  const config = {};
+  const form = new FormData();
+  form.set("easyMaximum", "10"); form.set("mediumMaximum", "20"); form.set("hardMaximum", "20");
+  form.set("easyReward", "6"); form.set("mediumReward", "3"); form.set("hardReward", "4");
+  const result = minesConfigurationFromForm(config, form);
+  assert.equal((result.difficulties as Record<string, { maximumWagerCents: number }>).EASY!.maximumWagerCents, 1000);
+  assert.equal((result.difficulties as Record<string, { rewardMultiplier: number }>).EASY!.rewardMultiplier, 6);
+  form.set("easyMaximum", "invalid");
   assert.throws(() => minesConfigurationFromForm(config, form));
 });

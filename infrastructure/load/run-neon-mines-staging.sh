@@ -32,12 +32,12 @@ if [[ ! "$PLAYER_USERNAME_PREFIX" =~ ^[A-Za-z0-9_.-]+$ ]]; then
 fi
 
 read -r -a concurrency_steps <<< "${CONCURRENCY_STEPS:-10 25 50}"
-read -r -a difficulties <<< "${MINES_DIFFICULTIES:-EASY MEDIUM HARD EXPERT}"
+read -r -a difficulties <<< "${MINES_DIFFICULTIES:-EASY MEDIUM HARD}"
 for players in "${concurrency_steps[@]}"; do
   [[ "$players" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid concurrency step: $players" >&2; exit 2; }
 done
 for difficulty in "${difficulties[@]}"; do
-  [[ "$difficulty" =~ ^(EASY|MEDIUM|HARD|EXPERT)$ ]] || { echo "Invalid Mines difficulty: $difficulty" >&2; exit 2; }
+  [[ "$difficulty" =~ ^(EASY|MEDIUM|HARD)$ ]] || { echo "Invalid Mines difficulty: $difficulty" >&2; exit 2; }
 done
 
 curl --fail --silent --show-error --max-time 10 "$ORIGIN/health/ready" >/dev/null
